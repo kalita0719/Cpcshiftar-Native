@@ -1,0 +1,391 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification for shift scheduler with alarms
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: shifts
+    description: Shift management
+  - name: alarms
+    description: Alarm management
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /shifts:
+    get:
+      operationId: listShifts
+      tags: [shifts]
+      summary: List all shifts
+      responses:
+        "200":
+          description: List of shifts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Shift"
+    post:
+      operationId: createShift
+      tags: [shifts]
+      summary: Create a shift
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateShiftBody"
+      responses:
+        "201":
+          description: Shift created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shift"
+
+  /shifts/{id}:
+    get:
+      operationId: getShift
+      tags: [shifts]
+      summary: Get a shift by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Shift found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shift"
+        "404":
+          description: Not found
+    put:
+      operationId: updateShift
+      tags: [shifts]
+      summary: Update a shift
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateShiftBody"
+      responses:
+        "200":
+          description: Shift updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shift"
+    delete:
+      operationId: deleteShift
+      tags: [shifts]
+      summary: Delete a shift
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /alarms:
+    get:
+      operationId: listAlarms
+      tags: [alarms]
+      summary: List all alarms
+      responses:
+        "200":
+          description: List of alarms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Alarm"
+    post:
+      operationId: createAlarm
+      tags: [alarms]
+      summary: Create an alarm
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAlarmBody"
+      responses:
+        "201":
+          description: Alarm created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alarm"
+
+  /alarms/{id}:
+    put:
+      operationId: updateAlarm
+      tags: [alarms]
+      summary: Update an alarm
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAlarmBody"
+      responses:
+        "200":
+          description: Alarm updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alarm"
+    delete:
+      operationId: deleteAlarm
+      tags: [alarms]
+      summary: Delete an alarm
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /shifts/week:
+    get:
+      operationId: getWeeklyShifts
+      tags: [shifts]
+      summary: Get shifts for a specific week
+      parameters:
+        - name: weekStart
+          in: query
+          required: true
+          schema:
+            type: string
+            description: ISO date string for the start of the week (Monday)
+      responses:
+        "200":
+          description: Shifts for the week
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Shift"
+
+  /shifts/summary:
+    get:
+      operationId: getShiftSummary
+      tags: [shifts]
+      summary: Get shift summary statistics
+      responses:
+        "200":
+          description: Shift summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShiftSummary"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    Shift:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          description: Shift name (e.g. Morning, Evening)
+        color:
+          type: string
+          description: Hex color for display
+        startTime:
+          type: string
+          description: Start time HH:MM
+        endTime:
+          type: string
+          description: End time HH:MM
+        date:
+          type: string
+          description: ISO date string YYYY-MM-DD
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - name
+        - color
+        - startTime
+        - endTime
+        - date
+        - createdAt
+
+    CreateShiftBody:
+      type: object
+      properties:
+        name:
+          type: string
+        color:
+          type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+        date:
+          type: string
+        notes:
+          type: string
+          nullable: true
+      required:
+        - name
+        - color
+        - startTime
+        - endTime
+        - date
+
+    Alarm:
+      type: object
+      properties:
+        id:
+          type: integer
+        shiftId:
+          type: integer
+          nullable: true
+          description: Optional link to a shift
+        label:
+          type: string
+        time:
+          type: string
+          description: Time HH:MM
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+          description: Days of week (0=Sun, 1=Mon ... 6=Sat)
+        enabled:
+          type: boolean
+        minutesBefore:
+          type: integer
+          description: Minutes before shift start to fire alarm
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - label
+        - time
+        - daysOfWeek
+        - enabled
+        - createdAt
+
+    CreateAlarmBody:
+      type: object
+      properties:
+        shiftId:
+          type: integer
+          nullable: true
+        label:
+          type: string
+        time:
+          type: string
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+        enabled:
+          type: boolean
+        minutesBefore:
+          type: integer
+          nullable: true
+      required:
+        - label
+        - time
+        - daysOfWeek
+        - enabled
+
+    UpdateAlarmBody:
+      type: object
+      properties:
+        shiftId:
+          type: integer
+          nullable: true
+        label:
+          type: string
+        time:
+          type: string
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+        enabled:
+          type: boolean
+        minutesBefore:
+          type: integer
+          nullable: true
+
+    ShiftSummary:
+      type: object
+      properties:
+        totalShifts:
+          type: integer
+        shiftsThisWeek:
+          type: integer
+        shiftsThisMonth:
+          type: integer
+        totalHoursThisWeek:
+          type: number
+        activeAlarms:
+          type: integer
+      required:
+        - totalShifts
+        - shiftsThisWeek
+        - shiftsThisMonth
+        - totalHoursThisWeek
+        - activeAlarms
