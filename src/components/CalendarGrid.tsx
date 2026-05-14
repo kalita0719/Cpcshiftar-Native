@@ -20,8 +20,8 @@ const DAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"];
 const LEAVE_COLOR = "#ec4899";
 const HO = 0.25;
 
-function isHolidayName(name: string) {
-  return name === "休假";
+function isHolidayLike(shift: ShiftItem) {
+  return shift.systemTag === "休假" || shift.name === "休假";
 }
 
 export type CalendarGridProps = {
@@ -30,9 +30,10 @@ export type CalendarGridProps = {
   scheduleMode?: boolean;
   selectedScheduleDate?: string | null;
   onDateSelect?: (dateStr: string) => void;
-  cycleMode?: boolean;
-  cycleStart?: string | null;
-  cycleEnd?: string | null;
+  /** 僅顯示班表，不處理任何日期點擊（行事曆分頁用）。 */
+  readOnly?: boolean;
+  /** 非選中日期格略為壓暗（打字機手動編輯用）。 */
+  typewriterDim?: boolean;
 };
 
 export default function CalendarGrid({
@@ -41,9 +42,8 @@ export default function CalendarGrid({
   scheduleMode,
   selectedScheduleDate,
   onDateSelect,
-  cycleMode,
-  cycleStart,
-  cycleEnd,
+  readOnly,
+  typewriterDim,
 }: CalendarGridProps) {
   const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(new Date()));
   const { shifts, overtime, settings } = useAppData();
@@ -77,18 +77,6 @@ export default function CalendarGrid({
     for (const s of shifts) m.set(s.date, s);
     return m;
   }, [shifts]);
-
-  const isInCycleRange = (dateStr: string): boolean => {
-    if (!cycleStart) return false;
-    const lo = cycleEnd && cycleStart > cycleEnd ? cycleEnd : cycleStart;
-    const hi = cycleEnd && cycleStart > cycleEnd ? cycleStart : (cycleEnd ?? cycleStart);
-    return dateStr >= lo && dateStr <= hi;
-  };
-
-  const isCycleEndpoint = (dateStr: string): boolean => {
-    if (!cycleStart) return false;
-    return dateStr === cycleStart || (!!cycleEnd && dateStr === cycleEnd);
-  };
 
   return (
     <View>
@@ -125,23 +113,23 @@ export default function CalendarGrid({
           const shift = shiftByDate.get(dateStr);
           const ot = overtimeMap.get(dateStr);
 
-          const isOvertimeMode = !!onOvertime && !onShiftClick && !scheduleMode && !cycleMode;
-          const isShiftMode = !!onShiftClick && !scheduleMode && !cycleMode;
-          const isScheduleOrCycle = !!(scheduleMode || cycleMode);
-          const isWork = !!shift && !isHolidayName(shift.name);
+          const isOvertimeMode = !readOnly && !!onOvertime && !onShiftClick && !scheduleMode;
+          const isShiftMode = !readOnly && !!onShiftClick && !scheduleMode;
+          const isScheduleMode = !readOnly && !!scheduleMode;
+          const isWork = !!shift && !isHolidayLike(shift);
 
-          const isSelectedScheduleDate = scheduleMode && selectedScheduleDate === dateStr;
-          const inCycleRange = cycleMode && isInCycleRange(dateStr);
-          const isCycleEP = cycleMode && isCycleEndpoint(dateStr);
+          const isSelectedScheduleDate = isScheduleMode && selectedScheduleDate === dateStr;
+          const dimTypewriter =
+            !!typewriterDim && isScheduleMode && !!selectedScheduleDate && inCurrentMonth && dateStr !== selectedScheduleDate;
 
           const handleCellClick = () => {
             if (!inCurrentMonth) return;
-            if (isScheduleOrCycle) onDateSelect?.(dateStr);
+            if (isScheduleMode) onDateSelect?.(dateStr);
             else if (isShiftMode) onShiftClick?.(day, shift);
             else if (isOvertimeMode) onOvertime?.(dateStr, ot, shift);
           };
 
-          const interactive = inCurrentMonth && (isShiftMode || isOvertimeMode || isScheduleOrCycle);
+          const interactive = !readOnly && inCurrentMonth && (isShiftMode || isOvertimeMode || isScheduleMode);
 
           const leaveStart = ot?.leaveStart ?? undefined;
           const leaveEnd = ot?.leaveEnd ?? undefined;
@@ -233,11 +221,9 @@ export default function CalendarGrid({
 
           let cellBorder: object = styles.cellBorderDefault;
           if (isSelectedScheduleDate) cellBorder = styles.cellSelectedSchedule;
-          else if (isCycleEP) cellBorder = styles.cellCycleEp;
-          else if (inCycleRange) cellBorder = styles.cellCycleRange;
           else if (isToday) cellBorder = styles.cellToday;
 
-          const bgOut = !inCurrentMonth ? styles.cellOutside : inCycleRange && !isCycleEP ? styles.cellCycleBg : styles.cellInside;
+          const bgOut = !inCurrentMonth ? styles.cellOutside : styles.cellInside;
 
           return (
             <Pressable
@@ -248,6 +234,7 @@ export default function CalendarGrid({
                 styles.cell,
                 bgOut,
                 cellBorder,
+                dimTypewriter && styles.cellDimTw,
                 interactive && pressed && styles.cellPressed,
               ]}
             >
@@ -280,16 +267,16 @@ export default function CalendarGrid({
                   <View
                     style={[
                       styles.shiftBadge,
-                      isHolidayName(shift.name) ? styles.shiftHoliday : { backgroundColor: shift.color },
+                      isHolidayLike(shift) ? styles.shiftHoliday : { backgroundColor: shift.color },
                     ]}
                   >
                     <Text
-                      style={[styles.shiftText, isHolidayName(shift.name) && { color: colors.muted }]}
+                      style={[styles.shiftText, isHolidayLike(shift) && { color: colors.muted }]}
                     >
                       {shift.name}
                     </Text>
                   </View>
-                ) : inCurrentMonth && (isShiftMode || isScheduleOrCycle) ? (
+                ) : inCurrentMonth && (isShiftMode || isScheduleMode) ? (
                   <View style={styles.plusPlaceholder} />
                 ) : null}
 
@@ -357,8 +344,8 @@ const styles = StyleSheet.create({
   cellBorderDefault: {},
   cellOutside: { backgroundColor: "#f8fafc" },
   cellInside: { backgroundColor: colors.card },
-  cellCycleBg: { backgroundColor: "#f0fdf4" },
   cellPressed: { opacity: 0.92 },
+  cellDimTw: { opacity: 0.52 },
   cellToday: {
     borderWidth: 2,
     borderColor: "#ef4444",
@@ -366,16 +353,6 @@ const styles = StyleSheet.create({
   cellSelectedSchedule: {
     borderWidth: 2,
     borderColor: colors.teal,
-  },
-  cellCycleEp: {
-    borderWidth: 2,
-    borderStyle: "dashed",
-    borderColor: colors.green,
-  },
-  cellCycleRange: {
-    borderWidth: 2,
-    borderStyle: "dashed",
-    borderColor: "#86efac",
   },
   dateRow: {
     flexDirection: "row",

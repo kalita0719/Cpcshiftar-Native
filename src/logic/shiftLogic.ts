@@ -4,6 +4,8 @@
  * `pattern[i % pattern.length]` 決定當日模板；`null` 表示休假列（固定色與 00:00–00:00）。
  */
 import { addDays, formatYMD, parseYMD, pad2 } from "@/src/logic/dates";
+import type { SystemShiftTag } from "@/src/types";
+import { effectiveTemplateTimes } from "@/src/types";
 
 export type CyclePatternEntry = number | null;
 
@@ -11,8 +13,9 @@ export type ShiftTemplateLike = {
   id: number;
   name: string;
   color: string;
-  startTime: string;
-  endTime: string;
+  startTime: string | null;
+  endTime: string | null;
+  systemTag?: SystemShiftTag;
 };
 
 export type GeneratedShiftRow = {
@@ -22,7 +25,64 @@ export type GeneratedShiftRow = {
   startTime: string;
   endTime: string;
   notes?: string | null;
+  systemTag?: SystemShiftTag;
 };
+
+/** 第二標籤：M=早/白、A=中、N=夜、O=休（對應 `SystemShiftTag`）。 */
+export type SystemSlotCode = "M" | "A" | "N" | "O";
+
+const CODE_TO_SYSTEM: Record<SystemSlotCode, SystemShiftTag> = {
+  M: "早班",
+  A: "中班",
+  N: "夜班",
+  O: "休假",
+};
+
+export function shiftTemplatesBySystemTag(templates: Iterable<ShiftTemplateLike>): Map<SystemShiftTag, ShiftTemplateLike> {
+  const m = new Map<SystemShiftTag, ShiftTemplateLike>();
+  for (const t of templates) {
+    if (t.systemTag) m.set(t.systemTag, t);
+  }
+  return m;
+}
+
+/**
+ * 依輪班 DNA 與「今日在週期中的索引」推算連續多天的班次列。
+ * `todayAlignIndex`：錨定日 `anchorYmd` 對應 DNA 陣列中的 0-based 位置。
+ */
+export function buildYearShiftRowsFromDna(
+  dna: readonly SystemSlotCode[],
+  todayAlignIndex: number,
+  anchorYmd: string,
+  templateByTag: Map<SystemShiftTag, ShiftTemplateLike>,
+  totalDays = 365,
+  notes?: string | null,
+): GeneratedShiftRow[] {
+  if (dna.length === 0) return [];
+  const L = dna.length;
+  const start = parseYMD(anchorYmd);
+  const rows: GeneratedShiftRow[] = [];
+  for (let dayDelta = 0; dayDelta < totalDays; dayDelta++) {
+    const d = addDays(start, dayDelta);
+    const dateStr = formatYMD(d);
+    const idx = (((todayAlignIndex + dayDelta) % L) + L) % L;
+    const code = dna[idx];
+    const st = CODE_TO_SYSTEM[code];
+    const t = templateByTag.get(st);
+    if (!t) continue;
+    const { startTime, endTime } = effectiveTemplateTimes(t);
+    rows.push({
+      date: dateStr,
+      name: t.name,
+      color: t.color,
+      startTime,
+      endTime,
+      notes: notes ?? null,
+      systemTag: st,
+    });
+  }
+  return rows;
+}
 
 const HOLIDAY_NAME = "休假";
 const HOLIDAY_COLOR = "#94a3b8";
@@ -58,12 +118,13 @@ export function buildCycleShiftRows(
     } else {
       const t = templateById.get(templateId);
       if (!t) continue;
+      const { startTime, endTime } = effectiveTemplateTimes(t);
       rows.push({
         date: dateStr,
         name: t.name,
         color: t.color,
-        startTime: t.startTime,
-        endTime: t.endTime,
+        startTime,
+        endTime,
         notes: notes ?? null,
       });
     }

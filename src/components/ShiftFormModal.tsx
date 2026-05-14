@@ -11,7 +11,8 @@ import {
 import { Palmtree, X, Zap } from "lucide-react-native";
 import { cardShadow, colors } from "@/src/components/theme";
 import { useAppData } from "@/src/state/AppDataContext";
-import type { ShiftItem } from "@/src/types";
+import type { ShiftItem, SystemShiftTag } from "@/src/types";
+import { effectiveTemplateTimes } from "@/src/types";
 
 const HOLIDAY_NAME = "休假";
 const HOLIDAY_COLOR = "#94a3b8";
@@ -33,6 +34,9 @@ export default function ShiftFormModal({ visible, onClose, defaultDate, editShif
   const [endTime, setEndTime] = useState("17:00");
   const [date, setDate] = useState(defaultDate ?? today);
   const [notes, setNotes] = useState("");
+  const [systemTag, setSystemTag] = useState<SystemShiftTag | undefined>(undefined);
+
+  const hideTimes = systemTag === "休假";
 
   useEffect(() => {
     if (!visible) return;
@@ -43,6 +47,7 @@ export default function ShiftFormModal({ visible, onClose, defaultDate, editShif
       setEndTime(editShift.endTime);
       setDate(editShift.date);
       setNotes(editShift.notes ?? "");
+      setSystemTag(editShift.systemTag);
     } else {
       setName("");
       setColor(PRESET_COLORS[0]);
@@ -50,21 +55,23 @@ export default function ShiftFormModal({ visible, onClose, defaultDate, editShif
       setEndTime("17:00");
       setDate(defaultDate ?? today);
       setNotes("");
+      setSystemTag(undefined);
     }
   }, [editShift, defaultDate, visible, today]);
 
   const applyHoliday = () => {
     setName(HOLIDAY_NAME);
     setColor(HOLIDAY_COLOR);
-    setStartTime("00:00");
-    setEndTime("00:00");
+    setSystemTag("休假");
   };
 
   const submit = () => {
+    const st = hideTimes ? "00:00" : startTime;
+    const et = hideTimes ? "00:00" : endTime;
     if (editShift) {
-      updateShift(editShift.id, { name, color, startTime, endTime, date, notes: notes || null });
+      updateShift(editShift.id, { name, color, startTime: st, endTime: et, date, notes: notes || null, systemTag });
     } else {
-      upsertShiftForDate({ name, color, startTime, endTime, date, notes: notes || null });
+      upsertShiftForDate({ name, color, startTime: st, endTime: et, date, notes: notes || null, systemTag });
     }
     onClose();
   };
@@ -81,6 +88,11 @@ export default function ShiftFormModal({ visible, onClose, defaultDate, editShif
             </Pressable>
           </View>
           <ScrollView>
+            {systemTag ? (
+              <View style={styles.sysBadge}>
+                <Text style={styles.sysBadgeText}>系統屬性：{systemTag}</Text>
+              </View>
+            ) : null}
             <Text style={styles.label}>日期</Text>
             <TextInput value={date} onChangeText={setDate} style={styles.input} />
             <Text style={styles.label}>名稱</Text>
@@ -93,8 +105,10 @@ export default function ShiftFormModal({ visible, onClose, defaultDate, editShif
                   onPress={() => {
                     setName(t.name);
                     setColor(t.color);
-                    setStartTime(t.startTime);
-                    setEndTime(t.endTime);
+                    const tt = effectiveTemplateTimes(t);
+                    setStartTime(tt.startTime);
+                    setEndTime(tt.endTime);
+                    setSystemTag(t.systemTag);
                   }}
                   style={[styles.tplChip, { borderColor: t.color }]}
                 >
@@ -117,16 +131,18 @@ export default function ShiftFormModal({ visible, onClose, defaultDate, editShif
                 />
               ))}
             </View>
-            <View style={styles.row2}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>開始</Text>
-                <TextInput value={startTime} onChangeText={setStartTime} style={styles.input} />
+            {!hideTimes ? (
+              <View style={styles.row2}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>開始</Text>
+                  <TextInput value={startTime} onChangeText={setStartTime} style={styles.input} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>結束</Text>
+                  <TextInput value={endTime} onChangeText={setEndTime} style={styles.input} />
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>結束</Text>
-                <TextInput value={endTime} onChangeText={setEndTime} style={styles.input} />
-              </View>
-            </View>
+            ) : null}
             <Text style={styles.label}>備註</Text>
             <TextInput value={notes} onChangeText={setNotes} style={styles.input} />
             <Pressable onPress={submit} style={styles.submit}>
@@ -151,6 +167,15 @@ const styles = StyleSheet.create({
   },
   head: { flexDirection: "row", justifyContent: "space-between", marginBottom: 14 },
   title: { fontSize: 18, fontWeight: "700", color: colors.text },
+  sysBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  sysBadgeText: { fontSize: 12, fontWeight: "600", color: "#64748b" },
   label: { fontSize: 12, fontWeight: "600", color: colors.muted, marginTop: 10, marginBottom: 6 },
   input: {
     borderWidth: 1,

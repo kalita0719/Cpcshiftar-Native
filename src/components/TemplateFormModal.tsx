@@ -38,13 +38,20 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
   const [endTime, setEndTime] = useState("15:00");
   const [notes, setNotes] = useState("");
 
+  const leaveEdit = editTemplate?.systemTag === "休假";
+
   useEffect(() => {
     if (!visible) return;
     if (editTemplate) {
       setName(editTemplate.name);
       setColor(editTemplate.color);
-      setStartTime(editTemplate.startTime);
-      setEndTime(editTemplate.endTime);
+      if (editTemplate.systemTag === "休假") {
+        setStartTime("");
+        setEndTime("");
+      } else {
+        setStartTime(editTemplate.startTime ?? "09:00");
+        setEndTime(editTemplate.endTime ?? "17:00");
+      }
       setNotes(editTemplate.notes ?? "");
     } else {
       setName("");
@@ -57,12 +64,25 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
 
   const submit = () => {
     if (editTemplate) {
-      updateTemplate(editTemplate.id, { name, color, startTime, endTime, notes: notes || null });
+      if (editTemplate.systemTag === "休假") {
+        updateTemplate(editTemplate.id, { name, color, startTime: null, endTime: null, notes: notes || null });
+      } else {
+        updateTemplate(editTemplate.id, { name, color, startTime, endTime, notes: notes || null });
+      }
     } else {
-      createTemplate({ name, color, startTime, endTime, notes: notes || null });
+      createTemplate({
+        name,
+        color,
+        startTime,
+        endTime,
+        notes: notes || null,
+        isFixed: false,
+      });
     }
     onClose();
   };
+
+  const systemBadge = editTemplate?.systemTag;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -76,6 +96,11 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
             </Pressable>
           </View>
           <ScrollView keyboardShouldPersistTaps="handled">
+            {systemBadge ? (
+              <View style={styles.sysBadge}>
+                <Text style={styles.sysBadgeText}>系統屬性：{systemBadge}</Text>
+              </View>
+            ) : null}
             <Text style={styles.label}>模板名稱（選填）</Text>
             <TextInput
               value={name}
@@ -98,16 +123,18 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
                 />
               ))}
             </View>
-            <View style={styles.row2}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>開始</Text>
-                <TextInput value={startTime} onChangeText={setStartTime} style={styles.input} />
+            {!leaveEdit ? (
+              <View style={styles.row2}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>開始</Text>
+                  <TextInput value={startTime} onChangeText={setStartTime} style={styles.input} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>結束</Text>
+                  <TextInput value={endTime} onChangeText={setEndTime} style={styles.input} />
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>結束</Text>
-                <TextInput value={endTime} onChangeText={setEndTime} style={styles.input} />
-              </View>
-            </View>
+            ) : null}
             <Text style={styles.label}>備註（選填）</Text>
             <TextInput
               value={notes}
@@ -135,6 +162,15 @@ const styles = StyleSheet.create({
   },
   head: { flexDirection: "row", justifyContent: "space-between", marginBottom: 16 },
   hTitle: { fontSize: 18, fontWeight: "700", color: colors.text },
+  sysBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  sysBadgeText: { fontSize: 12, fontWeight: "600", color: "#64748b" },
   label: { fontSize: 12, fontWeight: "600", color: colors.muted, marginBottom: 6, marginTop: 10 },
   input: {
     borderWidth: 1,

@@ -1,6 +1,6 @@
 import { Tabs } from "expo-router";
 import React from "react";
-import { Platform, Text } from "react-native";
+import { Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Banknote, Calendar, Clock, LayoutGrid } from "lucide-react-native";
 import { colors } from "@/src/components/theme";
@@ -32,16 +32,17 @@ function TabIcon({
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
-  // 底部 padding = 系統導覽列高度 + 固定間距
   const tabPaddingBottom = Math.max(insets.bottom, 8) + 2;
   const tabHeight = 52 + tabPaddingBottom;
 
   return (
     <Tabs
+      initialRouteName="index"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: "#fff",
         tabBarInactiveTintColor: colors.muted,
+        sceneStyle: { flex: 1, backgroundColor: colors.greyBg },
         tabBarStyle: {
           backgroundColor: colors.card,
           borderTopColor: colors.border,
@@ -90,7 +91,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="shifts"
         options={{
-          title: "班次",
+          title: "排班中心",
           tabBarIcon: ({ color, focused }) => <TabIcon name="shifts" color={color} focused={focused} />,
         }}
       />
