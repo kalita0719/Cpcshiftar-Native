@@ -211,6 +211,17 @@ export function leaveCase(
   return 12;
 }
 
+/**
+ * 交接班時數（與加班 `brackets` 拆段無關，另線 × 費率）。
+ * 9 全天／涵蓋頭尾 0h；10 前半請假僅下班交接 0.25h；11 後半請假僅上班交接 0.25h；
+ * 12 請假在中間或無請假 0.5h。
+ */
+export function handoverHoursFromLeaveCase(lc: 9 | 10 | 11 | 12): number {
+  if (lc === 9) return 0;
+  if (lc === 10 || lc === 11) return 0.25;
+  return 0.5;
+}
+
 /* ── OvertimePay 加班費累進拆段（原 OvertimePay.tsx brackets）──────── */
 
 export function brackets(h: number) {

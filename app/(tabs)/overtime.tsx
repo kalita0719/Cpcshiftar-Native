@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Banknote, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock } from "lucide-react-native";
-import { brackets, getPeriod, shortDate } from "@/src/logic/shiftLogic";
+import { brackets, getPeriod, handoverHoursFromLeaveCase, leaveCase, shortDate } from "@/src/logic/shiftLogic";
 import { Card } from "@/src/components/Card";
 import { colors } from "@/src/components/theme";
 import { useAppData } from "@/src/state/AppDataContext";
@@ -12,6 +12,12 @@ function fh(n: number) {
 }
 function fm(n: number) {
   return n > 0 ? `$${Math.round(n).toLocaleString()}` : "-";
+}
+
+/** 交接班時數顯示（避免浮點尾差）。 */
+function formatHandoverH(h: number) {
+  const n = Math.round(h * 100) / 100;
+  return `${n}h`;
 }
 
 export default function OvertimeScreen() {
@@ -45,6 +51,12 @@ export default function OvertimeScreen() {
   const midCount = periodShifts.filter((s) => s.name === "中班").length;
   const nightCount = periodShifts.filter((s) => s.name === "晚班").length;
 
+  const overtimeByDate = useMemo(() => {
+    const m = new Map<string, (typeof overtime)[0]>();
+    for (const o of overtimeData) m.set(o.date, o);
+    return m;
+  }, [overtimeData]);
+
   const rows = useMemo(() => {
     return overtimeData
       .map((ot) => {
@@ -59,11 +71,23 @@ export default function OvertimeScreen() {
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [overtimeData, hourlyRate]);
 
-  const handoverDates = useMemo(
-    () => (handover ? Array.from(workShiftDates).sort() : []),
-    [handover, workShiftDates],
-  );
-  const handoverTotalH = handoverDates.length * 0.5;
+  const handoverRows = useMemo(() => {
+    if (!handover) return [];
+    const sortedDates = Array.from(workShiftDates).sort();
+    const out: { date: string; hours: number }[] = [];
+    for (const d of sortedDates) {
+      const shift = periodShifts.find((s) => s.date === d && s.name !== "休假");
+      if (!shift) continue;
+      const ot = overtimeByDate.get(d);
+      const hasLeave = !!(ot?.leaveStart && ot?.leaveEnd);
+      const lc = hasLeave ? leaveCase(shift.startTime, shift.endTime, ot!.leaveStart!, ot!.leaveEnd!) : 12;
+      const hours = handoverHoursFromLeaveCase(lc);
+      out.push({ date: d, hours });
+    }
+    return out;
+  }, [handover, workShiftDates, periodShifts, overtimeByDate]);
+
+  const handoverTotalH = handoverRows.reduce((s, r) => s + r.hours, 0);
   const handoverPay = handoverTotalH * hourlyRate * 1.33;
 
   const totals = useMemo(
@@ -81,7 +105,7 @@ export default function OvertimeScreen() {
   const nightPay = nightCount * nitePerShift;
   const grandTotal = totals.pay + (handover ? handoverPay : 0) + midPay + nightPay;
   const hasData =
-    rows.length > 0 || (handover && handoverDates.length > 0) || midPay > 0 || nightPay > 0;
+    rows.length > 0 || (handover && handoverTotalH > 0) || midPay > 0 || nightPay > 0;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -177,12 +201,12 @@ export default function OvertimeScreen() {
                 <Text style={styles.lineRed}>{baseSalary > 0 ? fm(hourlyRate * totals.b200 * 2.0) : "—"}</Text>
               </View>
             )}
-            {handover && handoverDates.length > 0 && (
+            {handover && handoverTotalH > 0 && (
               <View style={{ marginTop: 4 }}>
                 <View style={styles.line}>
                   <View style={styles.handRow}>
                     <Text style={styles.lineMuted}>
-                      交接班 {handoverDates.length} 日 × 0.5h × 1.33
+                      交接班 {formatHandoverH(handoverTotalH)} × 1.33
                     </Text>
                     <Pressable
                       onPress={() => setShowHandoverDetail((v) => !v)}
@@ -202,10 +226,10 @@ export default function OvertimeScreen() {
                 </View>
                 {showHandoverDetail && (
                   <View style={styles.detailList}>
-                    {handoverDates.map((d) => (
-                      <View key={d} style={styles.detailRow}>
-                        <Text style={styles.detailDate}>{shortDate(d)}</Text>
-                        <Text style={styles.detailH}>0.5h</Text>
+                    {handoverRows.map((r) => (
+                      <View key={r.date} style={styles.detailRow}>
+                        <Text style={styles.detailDate}>{shortDate(r.date)}</Text>
+                        <Text style={styles.detailH}>{formatHandoverH(r.hours)}</Text>
                       </View>
                     ))}
                   </View>

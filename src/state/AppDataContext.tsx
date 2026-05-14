@@ -360,8 +360,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           lateHours: data.lateHours,
           earlyClassHours: data.earlyClassHours,
           lateClassHours: data.lateClassHours,
-          leaveStart: data.leaveStart ?? null,
-          leaveEnd: data.leaveEnd ?? null,
+          // 加班／上課儲存未帶請假欄位時，不得覆寫既有 leave（否則結算交接班永遠當成無請假）
+          leaveStart: "leaveStart" in data ? (data.leaveStart ?? null) : (existing?.leaveStart ?? null),
+          leaveEnd: "leaveEnd" in data ? (data.leaveEnd ?? null) : (existing?.leaveEnd ?? null),
           notes: data.notes ?? null,
           createdAt: existing?.createdAt ?? new Date().toISOString(),
         };

@@ -194,10 +194,10 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
     if (tab === "請假") {
       upsertOvertime({
         date,
-        earlyHours: 0,
-        lateHours: 0,
-        earlyClassHours: 0,
-        lateClassHours: 0,
+        earlyHours: existing?.earlyHours ?? 0,
+        lateHours: existing?.lateHours ?? 0,
+        earlyClassHours: existing?.earlyClassHours ?? 0,
+        lateClassHours: existing?.lateClassHours ?? 0,
         leaveStart: leaveStartTimeStr,
         leaveEnd: leaveEndTimeStr,
         notes: notes || undefined,
