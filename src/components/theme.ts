@@ -1,5 +1,12 @@
 import { Platform, type ViewStyle } from "react-native";
 
+/** 行事曆「幾號」數字：略小、偏窄，挪出格內空間給節日兩字標籤 */
+export const fontCalendarDateCondensed = Platform.select({
+  ios: "AvenirNextCondensed-Bold",
+  android: "sans-serif-condensed",
+  default: undefined,
+});
+
 export const colors = {
   teal: "#11928F",
   tealDark: "#0d7a78",

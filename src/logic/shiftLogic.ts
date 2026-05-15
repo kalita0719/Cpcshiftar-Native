@@ -84,6 +84,44 @@ export function buildYearShiftRowsFromDna(
   return rows;
 }
 
+/**
+ * 錨定日前連續 `totalDays` 天（不含錨定日本身）：anchor−totalDays … anchor−1。
+ * DNA 索引與 `buildYearShiftRowsFromDna` 在錨定日銜接（anchor 當日為 `todayAlignIndex`）。
+ */
+export function buildPastShiftRowsFromDna(
+  dna: readonly SystemSlotCode[],
+  todayAlignIndex: number,
+  anchorYmd: string,
+  templateByTag: Map<SystemShiftTag, ShiftTemplateLike>,
+  totalDays = 365,
+  notes?: string | null,
+): GeneratedShiftRow[] {
+  if (dna.length === 0) return [];
+  const L = dna.length;
+  const start = parseYMD(anchorYmd);
+  const rows: GeneratedShiftRow[] = [];
+  for (let k = totalDays; k >= 1; k--) {
+    const d = addDays(start, -k);
+    const dateStr = formatYMD(d);
+    const idx = (((todayAlignIndex - k) % L) + L) % L;
+    const code = dna[idx];
+    const st = CODE_TO_SYSTEM[code];
+    const t = templateByTag.get(st);
+    if (!t) continue;
+    const { startTime, endTime } = effectiveTemplateTimes(t);
+    rows.push({
+      date: dateStr,
+      name: t.name,
+      color: t.color,
+      startTime,
+      endTime,
+      notes: notes ?? null,
+      systemTag: st,
+    });
+  }
+  return rows;
+}
+
 const HOLIDAY_NAME = "休假";
 const HOLIDAY_COLOR = "#94a3b8";
 

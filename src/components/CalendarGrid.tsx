@@ -11,8 +11,9 @@ import {
   startOfMonth,
   startOfWeekMonday,
 } from "@/src/logic/dates";
+import { getHolidayCalendarChip } from "@/src/logic/holidayConfig";
 import { leaveCase, shiftTime } from "@/src/logic/shiftLogic";
-import { colors } from "@/src/components/theme";
+import { colors, fontCalendarDateCondensed } from "@/src/components/theme";
 import { useAppData } from "@/src/state/AppDataContext";
 import type { Overtime, ShiftItem } from "@/src/types";
 
@@ -141,17 +142,15 @@ export default function CalendarGrid({
           if (isLeave && shift && lCase !== 12) {
             if (lCase === 9) {
               earlyContent = (
-                <View style={[styles.subBadge, { backgroundColor: "#fce7f3" }]}>
-                  <Palmtree size={11} color={LEAVE_COLOR} />
-                  <Text style={[styles.subTime, { color: LEAVE_COLOR }]}>{leaveStart}</Text>
-                </View>
+                <Text style={[styles.extTime, { color: LEAVE_COLOR }]} numberOfLines={1} ellipsizeMode="clip">
+                  {leaveStart}
+                </Text>
               );
             } else if (lCase === 10) {
               earlyContent = (
-                <View style={[styles.subBadge, { backgroundColor: "#fce7f3" }]}>
-                  <Palmtree size={11} color={LEAVE_COLOR} />
-                  <Text style={[styles.subTime, { color: LEAVE_COLOR }]}>{leaveEnd}</Text>
-                </View>
+                <Text style={[styles.extTime, { color: LEAVE_COLOR }]} numberOfLines={1} ellipsizeMode="clip">
+                  {leaveEnd}
+                </Text>
               );
             }
           } else if (inCurrentMonth && isWork && ot) {
@@ -159,18 +158,18 @@ export default function CalendarGrid({
             const earlyClass = ot.earlyClassHours ?? 0;
             if (earlyHours > 0) {
               earlyContent = (
-                <View style={[styles.subBadge, { backgroundColor: "#ffedd5" }]}>
-                  <Clock size={11} color="#ea580c" />
-                  <Text style={[styles.subTime, { color: "#c2410c" }]}>
+                <View style={styles.extRow}>
+                  <Clock size={9} color="#ea580c" />
+                  <Text style={[styles.extTime, { color: "#c2410c" }]} numberOfLines={1} ellipsizeMode="clip">
                     {shiftTime(shift!.startTime, -(earlyHours + ho))}
                   </Text>
                 </View>
               );
             } else if (earlyClass > 0) {
               earlyContent = (
-                <View style={[styles.subBadge, { backgroundColor: "#dbeafe" }]}>
-                  <FileText size={11} color="#2563eb" />
-                  <Text style={[styles.subTime, { color: "#1d4ed8" }]}>
+                <View style={styles.extRow}>
+                  <FileText size={9} color="#2563eb" />
+                  <Text style={[styles.extTime, { color: "#1d4ed8" }]} numberOfLines={1} ellipsizeMode="clip">
                     {shiftTime(shift!.startTime, -(earlyClass + ho))}
                   </Text>
                 </View>
@@ -182,17 +181,15 @@ export default function CalendarGrid({
           if (isLeave && shift && lCase !== 12) {
             if (lCase === 9) {
               lateContent = (
-                <View style={[styles.subBadge, { backgroundColor: "#fce7f3" }]}>
-                  <Palmtree size={11} color={LEAVE_COLOR} />
-                  <Text style={[styles.subTime, { color: LEAVE_COLOR }]}>{leaveEnd}</Text>
-                </View>
+                <Text style={[styles.extTime, { color: LEAVE_COLOR }]} numberOfLines={1} ellipsizeMode="clip">
+                  {leaveEnd}
+                </Text>
               );
             } else if (lCase === 11) {
               lateContent = (
-                <View style={[styles.subBadge, { backgroundColor: "#fce7f3" }]}>
-                  <Palmtree size={11} color={LEAVE_COLOR} />
-                  <Text style={[styles.subTime, { color: LEAVE_COLOR }]}>{leaveStart}</Text>
-                </View>
+                <Text style={[styles.extTime, { color: LEAVE_COLOR }]} numberOfLines={1} ellipsizeMode="clip">
+                  {leaveStart}
+                </Text>
               );
             }
           } else if (inCurrentMonth && isWork && ot) {
@@ -200,18 +197,18 @@ export default function CalendarGrid({
             const lateClass = ot.lateClassHours ?? 0;
             if (lateHours > 0) {
               lateContent = (
-                <View style={[styles.subBadge, { backgroundColor: "#fef3c7" }]}>
-                  <Clock size={11} color="#d97706" />
-                  <Text style={[styles.subTime, { color: "#b45309" }]}>
+                <View style={styles.extRow}>
+                  <Clock size={9} color="#d97706" />
+                  <Text style={[styles.extTime, { color: "#b45309" }]} numberOfLines={1} ellipsizeMode="clip">
                     {shiftTime(shift!.endTime, lateHours + ho)}
                   </Text>
                 </View>
               );
             } else if (lateClass > 0) {
               lateContent = (
-                <View style={[styles.subBadge, { backgroundColor: "#e0e7ff" }]}>
-                  <FileText size={11} color="#4f46e5" />
-                  <Text style={[styles.subTime, { color: "#4338ca" }]}>
+                <View style={styles.extRow}>
+                  <FileText size={9} color="#4f46e5" />
+                  <Text style={[styles.extTime, { color: "#4338ca" }]} numberOfLines={1} ellipsizeMode="clip">
                     {shiftTime(shift!.endTime, lateClass + ho)}
                   </Text>
                 </View>
@@ -219,11 +216,14 @@ export default function CalendarGrid({
             }
           }
 
+          const showLeaveGhost = !!(isLeave && shift);
+
           let cellBorder: object = styles.cellBorderDefault;
           if (isSelectedScheduleDate) cellBorder = styles.cellSelectedSchedule;
           else if (isToday) cellBorder = styles.cellToday;
 
           const bgOut = !inCurrentMonth ? styles.cellOutside : styles.cellInside;
+          const holidayChip = getHolidayCalendarChip(dateStr);
 
           return (
             <Pressable
@@ -238,49 +238,69 @@ export default function CalendarGrid({
                 interactive && pressed && styles.cellPressed,
               ]}
             >
-              <View style={styles.dateRow}>
-                <Text
-                  style={[
-                    styles.dateNum,
-                    isToday && styles.dateToday,
-                    !inCurrentMonth && styles.dateMuted,
-                  ]}
-                >
-                  {day.getDate()}
-                </Text>
-                {inCurrentMonth && !ot && isOvertimeMode && (
-                  <View style={styles.otHint}>
-                    <Clock size={10} color={colors.muted} />
-                    <Text style={styles.otHintText}>加班</Text>
-                  </View>
-                )}
+              {/* 頂部日期區：與班次內容完全隔離 */}
+              <View style={styles.cellHeader}>
+                <View style={styles.dateHead}>
+                  <Text
+                    style={[
+                      styles.dateNum,
+                      isToday && styles.dateToday,
+                      !inCurrentMonth && styles.dateMuted,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {day.getDate()}
+                  </Text>
+                  {holidayChip ? (
+                    <Text
+                      style={[styles.holidayName, { color: holidayChip.color }]}
+                      numberOfLines={1}
+                      ellipsizeMode="clip"
+                    >
+                      {holidayChip.label}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
 
-              <View style={styles.stack}>
-                <View style={styles.slot}>{earlyContent}</View>
-
-                {shift && lCase === 9 ? (
-                  <View style={[styles.shiftBadge, { backgroundColor: LEAVE_COLOR }]}>
-                    <Text style={styles.shiftText}>請假</Text>
+              {/* 班次內容區：1 : 2 : 1 垂直比例 */}
+              <View style={styles.shiftBody}>
+                {showLeaveGhost ? (
+                  <View style={styles.leaveGhost} pointerEvents="none">
+                    <Palmtree size={11} color={LEAVE_COLOR} />
                   </View>
-                ) : shift ? (
-                  <View
-                    style={[
-                      styles.shiftBadge,
-                      isHolidayLike(shift) ? styles.shiftHoliday : { backgroundColor: shift.color },
-                    ]}
-                  >
-                    <Text
-                      style={[styles.shiftText, isHolidayLike(shift) && { color: colors.muted }]}
-                    >
-                      {shift.name}
-                    </Text>
-                  </View>
-                ) : inCurrentMonth && (isShiftMode || isScheduleMode) ? (
-                  <View style={styles.plusPlaceholder} />
                 ) : null}
 
-                <View style={styles.slot}>{lateContent}</View>
+                <View style={styles.slotEarly}>{earlyContent}</View>
+
+                <View style={styles.slotMid}>
+                  {shift && lCase === 9 ? (
+                    <View style={[styles.shiftBadge, { backgroundColor: LEAVE_COLOR }]}>
+                      <Text style={styles.shiftText} numberOfLines={1} ellipsizeMode="clip">
+                        請假
+                      </Text>
+                    </View>
+                  ) : shift ? (
+                    <View
+                      style={[
+                        styles.shiftBadge,
+                        isHolidayLike(shift) ? styles.shiftHoliday : { backgroundColor: shift.color },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.shiftText, isHolidayLike(shift) && { color: colors.muted }]}
+                        numberOfLines={1}
+                        ellipsizeMode="clip"
+                      >
+                        {shift.name}
+                      </Text>
+                    </View>
+                  ) : inCurrentMonth && (isShiftMode || isScheduleMode) ? (
+                    <View style={styles.plusPlaceholder} />
+                  ) : null}
+                </View>
+
+                <View style={styles.slotLate}>{lateContent}</View>
               </View>
             </Pressable>
             );
@@ -335,11 +355,13 @@ const styles = StyleSheet.create({
   cell: {
     flex: 1,
     minHeight: 102,
+    flexDirection: "column",
+    overflow: "hidden",
     borderRightWidth: 1,
     borderBottomWidth: 1,
     borderColor: colors.border,
     paddingHorizontal: 2,
-    paddingBottom: 4,
+    paddingBottom: 2,
   },
   cellBorderDefault: {},
   cellOutside: { backgroundColor: "#f8fafc" },
@@ -354,39 +376,101 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.teal,
   },
-  dateRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+  cellHeader: {
+    flexShrink: 0,
     paddingTop: 2,
+    paddingBottom: 2,
+    minHeight: 18,
+    overflow: "hidden",
   },
-  dateNum: { fontSize: 18, fontWeight: "700", color: colors.text },
+  dateHead: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    flexWrap: "nowrap",
+    minWidth: 0,
+    maxWidth: "100%",
+    overflow: "hidden",
+  },
+  dateNum: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.text,
+    ...(fontCalendarDateCondensed ? { fontFamily: fontCalendarDateCondensed } : {}),
+  },
   dateToday: { color: "#ef4444" },
   dateMuted: { color: "#94a3b8", opacity: 0.7 },
-  otHint: { flexDirection: "row", alignItems: "center", gap: 2, opacity: 0.45 },
-  otHintText: { fontSize: 9, color: colors.muted },
-  stack: { flex: 1, gap: 3, marginTop: 2 },
-  slot: { minHeight: 20, justifyContent: "center" },
-  subBadge: {
+  holidayName: {
+    fontSize: 9,
+    fontWeight: "700",
+    marginLeft: 0.5,
+    flexShrink: 0,
+    includeFontPadding: false,
+  },
+  shiftBody: {
+    flex: 1,
+    flexDirection: "column",
+    minHeight: 0,
+    overflow: "hidden",
+    position: "relative",
+  },
+  leaveGhost: {
+    position: "absolute",
+    right: 2,
+    bottom: 1,
+    zIndex: 2,
+  },
+  slotEarly: {
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+    justifyContent: "center",
+    alignItems: "flex-end",
+    paddingRight: 4,
+  },
+  slotMid: {
+    flex: 2,
+    minHeight: 0,
+    overflow: "hidden",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 1,
+  },
+  slotLate: {
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+    justifyContent: "center",
+    alignItems: "flex-end",
+    paddingRight: 4,
+  },
+  extRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 2,
-    borderRadius: 4,
-    paddingHorizontal: 2,
-    paddingVertical: 1,
+    maxWidth: "100%",
+    overflow: "hidden",
   },
-  subTime: { fontSize: 11, fontWeight: "600" },
+  extTime: {
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: "600",
+    flexShrink: 1,
+    textAlign: "right",
+  },
   shiftBadge: {
     borderRadius: 6,
-    paddingVertical: 4,
+    paddingVertical: 3,
+    paddingHorizontal: 3,
     alignItems: "center",
     justifyContent: "center",
+    maxWidth: "100%",
+    overflow: "hidden",
   },
   shiftHoliday: {
     backgroundColor: "#f1f5f9",
     borderWidth: 1,
     borderColor: colors.border,
   },
-  shiftText: { color: "#fff", fontSize: 15, fontWeight: "700" },
-  plusPlaceholder: { flex: 1, minHeight: 24 },
+  shiftText: { color: "#fff", fontSize: 13, fontWeight: "700", textAlign: "center" },
+  plusPlaceholder: { flex: 1, width: "100%", minHeight: 8 },
 });

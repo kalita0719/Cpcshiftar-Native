@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { formatYMD } from "@/src/logic/dates";
 import {
+  buildPastShiftRowsFromDna,
   buildYearShiftRowsFromDna,
   shiftTemplatesBySystemTag,
   type SystemSlotCode,
@@ -95,13 +96,15 @@ export default function SmartSchedulePanel({ anchorYmd, embedded, onAfterBulkSch
       }
       Alert.alert(
         "確認排班",
-        `你選擇了 ${ruleTitle}，且今日為 ${todayLabel}，系統將自動排滿未來一年，是否正確？`,
+        `你選擇了 ${ruleTitle}，且今日為 ${todayLabel}，系統將自錨定日起往後 365 天、並往前 365 天寫入班表，是否正確？`,
         [
           { text: "取消", style: "cancel" },
           {
             text: "確定",
             onPress: () => {
-              const rows = buildYearShiftRowsFromDna(dna, todayIndex, anchor, tagMap, 365, null);
+              const forward = buildYearShiftRowsFromDna(dna, todayIndex, anchor, tagMap, 365, null);
+              const past = buildPastShiftRowsFromDna(dna, todayIndex, anchor, tagMap, 365, null);
+              const rows = [...past, ...forward];
               if (rows.length === 0) {
                 Alert.alert("無法排班", "無法產生任何班次列，請檢查模板或規則。");
                 return;
