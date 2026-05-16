@@ -10,19 +10,9 @@ import {
 } from "react-native";
 import { X } from "lucide-react-native";
 import { cardShadow, colors } from "@/src/components/theme";
+import { SHIFT_PRESET_COLORS } from "@/src/constants/shiftPresetColors";
 import { useAppData } from "@/src/state/AppDataContext";
 import type { ShiftTemplate } from "@/src/types";
-
-const PRESET_COLORS = [
-  "#f59e0b",
-  "#11928F",
-  "#6B66E8",
-  "#10b981",
-  "#ef4444",
-  "#3b82f6",
-  "#ec4899",
-  "#8b5cf6",
-];
 
 type Props = {
   visible: boolean;
@@ -33,7 +23,7 @@ type Props = {
 export default function TemplateFormModal({ visible, onClose, editTemplate }: Props) {
   const { createTemplate, updateTemplate } = useAppData();
   const [name, setName] = useState("");
-  const [color, setColor] = useState(PRESET_COLORS[0]);
+  const [color, setColor] = useState(SHIFT_PRESET_COLORS[0]);
   const [startTime, setStartTime] = useState("07:00");
   const [endTime, setEndTime] = useState("15:00");
   const [notes, setNotes] = useState("");
@@ -55,7 +45,7 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
       setNotes(editTemplate.notes ?? "");
     } else {
       setName("");
-      setColor(PRESET_COLORS[0]);
+      setColor(SHIFT_PRESET_COLORS[0]);
       setStartTime("09:00");
       setEndTime("17:00");
       setNotes("");
@@ -111,9 +101,9 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
             />
             <Text style={styles.label}>顏色</Text>
             <View style={styles.colors}>
-              {PRESET_COLORS.map((c) => (
+              {SHIFT_PRESET_COLORS.map((c, i) => (
                 <Pressable
-                  key={c}
+                  key={`preset-${i}`}
                   onPress={() => setColor(c)}
                   style={[
                     styles.colorDot,

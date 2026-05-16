@@ -2,6 +2,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { formatYMD } from "@/src/logic/dates";
 import { type GeneratedShiftRow } from "@/src/logic/shiftLogic";
+import { applyTemplateAppearanceToShifts } from "@/src/logic/templateShiftSync";
+import {
+  applyPaletteToShifts,
+  applyPaletteToTemplates,
+  COLOR_PALETTE_VERSION,
+  migrateShiftColor,
+  SHIFT_SEED_COLOR,
+} from "@/src/constants/shiftPresetColors";
 import type { AppSettings, Overtime, ShiftItem, ShiftTemplate, SystemShiftTag } from "@/src/types";
 
 const STORAGE_KEY = "cpc_native_app_v1";
@@ -15,6 +23,7 @@ const defaultSettings = (): AppSettings => ({
   nextShiftId: 1,
   nextTemplateId: 5,
   nextOvertimeId: 1,
+  shiftColorPaletteVersion: COLOR_PALETTE_VERSION,
 });
 
 function seedTemplates(now: string): ShiftTemplate[] {
@@ -22,7 +31,7 @@ function seedTemplates(now: string): ShiftTemplate[] {
     {
       id: 1,
       name: "預設早班",
-      color: "#F29D11",
+      color: SHIFT_SEED_COLOR.早班,
       startTime: "07:00",
       endTime: "15:00",
       notes: null,
@@ -33,7 +42,7 @@ function seedTemplates(now: string): ShiftTemplate[] {
     {
       id: 2,
       name: "預設中班",
-      color: "#11928F",
+      color: SHIFT_SEED_COLOR.中班,
       startTime: "15:00",
       endTime: "23:00",
       notes: null,
@@ -44,7 +53,7 @@ function seedTemplates(now: string): ShiftTemplate[] {
     {
       id: 3,
       name: "預設夜班",
-      color: "#6B66E8",
+      color: SHIFT_SEED_COLOR.夜班,
       startTime: "23:00",
       endTime: "07:00",
       notes: null,
@@ -55,7 +64,7 @@ function seedTemplates(now: string): ShiftTemplate[] {
     {
       id: 4,
       name: "預設休假",
-      color: "#E85299",
+      color: SHIFT_SEED_COLOR.休假,
       startTime: null,
       endTime: null,
       notes: null,
@@ -173,8 +182,12 @@ function upgradePersistedTemplates(rows: unknown[], now: string): ShiftTemplate[
     if (t) parsed.push(t);
   }
   if (parsed.length === 0) return seedTemplates(now);
-  if (legacy) return mergeLegacyCoreTemplates(parsed, now);
-  return normalizeModernTemplates(parsed);
+  const upgraded = legacy ? mergeLegacyCoreTemplates(parsed, now) : normalizeModernTemplates(parsed);
+  return upgraded.map((t) => ({ ...t, color: migrateShiftColor(t.color) }));
+}
+
+function migratePersistedShifts(rows: ShiftItem[]): ShiftItem[] {
+  return rows.map((s) => ({ ...s, color: migrateShiftColor(s.color) }));
 }
 
 function nextId<T extends { id: number }>(items: T[]): number {
@@ -230,14 +243,23 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         if (raw) {
           const p = JSON.parse(raw) as PersistShape;
           if (!cancelled) {
-            setShifts(Array.isArray(p.shifts) ? p.shifts : []);
-            setTemplates(
+            const loadedShifts = Array.isArray(p.shifts) ? p.shifts : [];
+            let loadedTemplates =
               Array.isArray(p.templates) && p.templates.length
                 ? upgradePersistedTemplates(p.templates, new Date().toISOString())
-                : seedTemplates(new Date().toISOString()),
-            );
+                : seedTemplates(new Date().toISOString());
+            let migratedShifts = migratePersistedShifts(loadedShifts);
+            const mergedSettings = { ...defaultSettings(), ...p.settings };
+            const paletteV = mergedSettings.shiftColorPaletteVersion ?? 0;
+            if (paletteV < COLOR_PALETTE_VERSION) {
+              loadedTemplates = applyPaletteToTemplates(loadedTemplates);
+              migratedShifts = applyPaletteToShifts(migratedShifts, loadedTemplates);
+              mergedSettings.shiftColorPaletteVersion = COLOR_PALETTE_VERSION;
+            }
+            setShifts(migratedShifts);
+            setTemplates(loadedTemplates);
             setOvertime(Array.isArray(p.overtime) ? p.overtime : []);
-            setSettings({ ...defaultSettings(), ...p.settings });
+            setSettings(mergedSettings);
           }
         } else if (!cancelled) {
           setTemplates(seedTemplates(new Date().toISOString()));
@@ -325,13 +347,19 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateTemplate = useCallback((id: number, patch: Partial<ShiftTemplate>) => {
-    setTemplates((prev) =>
-      prev.map((t) => {
+    setTemplates((prev) => {
+      const before = prev.find((t) => t.id === id);
+      const next = prev.map((t) => {
         if (t.id !== id) return t;
         const { systemTag: _st, isFixed: _fx, ...safe } = patch;
         return { ...t, ...safe };
-      }),
-    );
+      });
+      const after = next.find((t) => t.id === id);
+      if (before && after && patch.color !== undefined && patch.color !== before.color) {
+        setShifts((shifts) => applyTemplateAppearanceToShifts(shifts, after, before.color));
+      }
+      return next;
+    });
   }, []);
 
   const deleteTemplate = useCallback((id: number) => {

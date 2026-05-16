@@ -62,4 +62,6 @@ export type AppSettings = {
   nextShiftId: number;
   nextTemplateId: number;
   nextOvertimeId: number;
+  /** 已套用的班表色盤版本；低於 constants 內 COLOR_PALETTE_VERSION 時會重同步顏色。 */
+  shiftColorPaletteVersion?: number;
 };

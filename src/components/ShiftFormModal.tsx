@@ -12,12 +12,11 @@ import { Palmtree, X, Zap } from "lucide-react-native";
 import { cardShadow, colors } from "@/src/components/theme";
 import { useAppData } from "@/src/state/AppDataContext";
 import type { ShiftItem, SystemShiftTag } from "@/src/types";
+import { SHIFT_PRESET_COLORS } from "@/src/constants/shiftPresetColors";
 import { effectiveTemplateTimes } from "@/src/types";
 
 const HOLIDAY_NAME = "休假";
 const HOLIDAY_COLOR = "#94a3b8";
-const PRESET_COLORS = ["#11928F", "#F29D11", "#6B66E8", "#10b981", "#ef4444", "#3b82f6", "#ec4899"];
-
 type Props = {
   visible: boolean;
   onClose: () => void;
@@ -29,7 +28,7 @@ export default function ShiftFormModal({ visible, onClose, defaultDate, editShif
   const { templates, upsertShiftForDate, updateShift } = useAppData();
   const today = new Date().toISOString().slice(0, 10);
   const [name, setName] = useState("");
-  const [color, setColor] = useState(PRESET_COLORS[0]);
+  const [color, setColor] = useState(SHIFT_PRESET_COLORS[0]);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("17:00");
   const [date, setDate] = useState(defaultDate ?? today);
@@ -50,7 +49,7 @@ export default function ShiftFormModal({ visible, onClose, defaultDate, editShif
       setSystemTag(editShift.systemTag);
     } else {
       setName("");
-      setColor(PRESET_COLORS[0]);
+      setColor(SHIFT_PRESET_COLORS[0]);
       setStartTime("09:00");
       setEndTime("17:00");
       setDate(defaultDate ?? today);
@@ -123,9 +122,9 @@ export default function ShiftFormModal({ visible, onClose, defaultDate, editShif
             </ScrollView>
             <Text style={styles.label}>顏色</Text>
             <View style={styles.colors}>
-              {PRESET_COLORS.map((c) => (
+              {SHIFT_PRESET_COLORS.map((c, i) => (
                 <Pressable
-                  key={c}
+                  key={`preset-${i}`}
                   onPress={() => setColor(c)}
                   style={[styles.dot, { backgroundColor: c }, color === c && styles.dotRing]}
                 />
