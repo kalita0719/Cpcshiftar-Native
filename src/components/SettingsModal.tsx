@@ -105,7 +105,7 @@ export default function SettingsModal({ visible, onClose }: Props) {
                 <TextInput keyboardType="numeric" value={mid} onChangeText={setMid} style={styles.input} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.label}>晚班津貼 (元 / 次)</Text>
+                <Text style={styles.label}>夜班津貼 (元 / 次)</Text>
                 <TextInput keyboardType="numeric" value={night} onChangeText={setNight} style={styles.input} />
               </View>
             </View>

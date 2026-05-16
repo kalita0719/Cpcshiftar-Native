@@ -53,22 +53,127 @@ function formatDateLabel(dateStr: string) {
   return `${dateStr} (${DAY_MAP[d.getDay()]})`;
 }
 
-/* ── 加班自訂滑桿 Thumb ────────────────────────────────────── */
-function OtThumb({ color }: { color: string }) {
+const OT_THUMB = 22;
+const OT_TRACK_H = 8;
+
+/** 加班／上課：以 0 為中心，僅點亮 0 與圓點之間的軌道 */
+function OtCenterSlider({
+  value,
+  onChange,
+  color,
+  trackW,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  color: string;
+  trackW: number;
+}) {
+  const trackInner = Math.max(trackW - OT_THUMB, 1);
+
+  const valueToX = useCallback(
+    (v: number) => OT_THUMB / 2 + ((v - MIN_H) / (MAX_H - MIN_H)) * trackInner,
+    [trackInner],
+  );
+
+  const xToValue = useCallback(
+    (x: number) => {
+      const t = Math.max(0, Math.min(1, (x - OT_THUMB / 2) / trackInner));
+      const raw = MIN_H + t * (MAX_H - MIN_H);
+      return Math.round(raw / STEP) * STEP;
+    },
+    [trackInner],
+  );
+
+  const thumbX = valueToX(value);
+  const centerX = valueToX(0);
+  const wrapRef = useRef<View>(null);
+
+  const setFromPageX = useCallback(
+    (pageX: number) => {
+      wrapRef.current?.measure((_x, _y, width, _h, pageLeft) => {
+        const localX = Math.max(OT_THUMB / 2, Math.min(pageX - pageLeft, width - OT_THUMB / 2));
+        onChange(xToValue(localX));
+      });
+    },
+    [onChange, xToValue],
+  );
+
+  const setFromPageXRef = useRef(setFromPageX);
+  setFromPageXRef.current = setFromPageX;
+
+  const pan = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => setFromPageXRef.current(evt.nativeEvent.pageX),
+        onPanResponderMove: (evt) => setFromPageXRef.current(evt.nativeEvent.pageX),
+      }),
+    [],
+  );
+
+  const fillStyle =
+    value < 0
+      ? { left: thumbX, width: Math.max(0, centerX - thumbX) }
+      : value > 0
+        ? { left: centerX, width: Math.max(0, thumbX - centerX) }
+        : { left: centerX, width: 0 };
+
   return (
     <View
-      style={{
-        width: 22,
-        height: 22,
-        borderRadius: 11,
-        backgroundColor: color,
-        shadowColor: color,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.35,
-        shadowRadius: 4,
-        elevation: 4,
-      }}
-    />
+      ref={wrapRef}
+      style={{ width: trackW, height: OT_THUMB, justifyContent: "center" }}
+      {...pan.panHandlers}
+    >
+      <View
+        style={{
+          position: "absolute",
+          left: OT_THUMB / 2,
+          right: OT_THUMB / 2,
+          height: OT_TRACK_H,
+          borderRadius: 4,
+          backgroundColor: "#e2e8f0",
+        }}
+      />
+      {value !== 0 ? (
+        <View
+          style={{
+            position: "absolute",
+            height: OT_TRACK_H,
+            borderRadius: 4,
+            backgroundColor: color,
+            top: (OT_THUMB - OT_TRACK_H) / 2,
+            ...fillStyle,
+          }}
+        />
+      ) : null}
+      <View
+        style={{
+          position: "absolute",
+          left: centerX - 1,
+          width: 2,
+          height: OT_TRACK_H + 4,
+          top: (OT_THUMB - OT_TRACK_H) / 2 - 2,
+          backgroundColor: "#94a3b8",
+          borderRadius: 1,
+        }}
+      />
+      <View
+        style={{
+          position: "absolute",
+          left: thumbX - OT_THUMB / 2,
+          width: OT_THUMB,
+          height: OT_THUMB,
+          borderRadius: OT_THUMB / 2,
+          backgroundColor: color,
+          shadowColor: color,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.35,
+          shadowRadius: 4,
+          elevation: 4,
+        }}
+      />
+    </View>
   );
 }
 
@@ -181,10 +286,6 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
     if (w > 10) setTrackW(w);
   };
 
-  /* ── 加班單值 slider：把 MultiSlider 值域 [-50,50] / 10 轉成 0.5 步 ── */
-  // MultiSlider 只支援整數步進，因此乘以 10 再除回來
-  const otIntValue = Math.round(sliderValue * 10);
-
   /* ── 儲存 ── */
   const canSaveLeave = tab === "請假" && !!shift && leaveEndPos > leaveStartPos;
   const canSaveOt = tab !== "請假" && hours > 0;
@@ -277,23 +378,12 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
                 ))}
               </View>
 
-              {/* MultiSlider 單拇指：步進 0.5h，範圍 -5…5 */}
               <View style={styles.sliderWrap} onLayout={onTrackLayout}>
-                <MultiSlider
-                  values={[otIntValue]}
-                  min={-50}
-                  max={50}
-                  step={5}             // 步進 5 / 10 = 0.5h
-                  sliderLength={trackW - 4}
-                  onValuesChange={(vals) => setSliderValue(vals[0] / 10)}
-                  selectedStyle={{ backgroundColor: typeColor }}
-                  unselectedStyle={{ backgroundColor: "#e2e8f0" }}
-                  containerStyle={{ alignSelf: "center" }}
-                  trackStyle={{ height: 8, borderRadius: 4 }}
-                  customMarker={() => <OtThumb color={typeColor} />}
-                  enabledOne
-                  snapped
-                  allowOverlap={false}
+                <OtCenterSlider
+                  value={sliderValue}
+                  onChange={setSliderValue}
+                  color={typeColor}
+                  trackW={trackW}
                 />
               </View>
             </>

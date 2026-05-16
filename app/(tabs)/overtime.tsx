@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Banknote, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock } from "lucide-react-native";
+import { buildPeriodAllowanceBreakdown } from "@/src/logic/shiftAllowance";
 import { brackets, getPeriod, handoverHoursFromLeaveCase, leaveCase, shortDate } from "@/src/logic/shiftLogic";
 import { Card } from "@/src/components/Card";
 import { colors } from "@/src/components/theme";
@@ -24,6 +25,7 @@ export default function OvertimeScreen() {
   const { shifts, overtime, settings } = useAppData();
   const [offset, setOffset] = useState(0);
   const [showHandoverDetail, setShowHandoverDetail] = useState(false);
+  const [showAllowanceDetail, setShowAllowanceDetail] = useState(false);
 
   const startDay = Math.min(28, Math.max(1, parseInt(settings.startDay, 10) || 1));
   const period = useMemo(() => getPeriod(startDay, offset), [startDay, offset]);
@@ -31,7 +33,7 @@ export default function OvertimeScreen() {
   const baseSalary = parseFloat(settings.baseSalary) || 0;
   const hourlyRate = baseSalary / 240;
   const midPerShift = parseFloat(settings.midAllowance) || 0;
-  const nitePerShift = parseFloat(settings.nightAllowance) || 0;
+  const nightPerShift = parseFloat(settings.nightAllowance) || 0;
   const handover = settings.handoverEnabled;
 
   const overtimeData = useMemo(
@@ -48,14 +50,32 @@ export default function OvertimeScreen() {
     () => new Set(periodShifts.filter((s) => s.name !== "休假").map((s) => s.date)),
     [periodShifts],
   );
-  const midCount = periodShifts.filter((s) => s.name === "中班").length;
-  const nightCount = periodShifts.filter((s) => s.name === "晚班").length;
-
   const overtimeByDate = useMemo(() => {
     const m = new Map<string, (typeof overtime)[0]>();
     for (const o of overtimeData) m.set(o.date, o);
     return m;
   }, [overtimeData]);
+
+  const allowanceBreakdown = useMemo(() => {
+    const shiftsWithLeave = periodShifts.map((s) => {
+      const ot = overtimeByDate.get(s.date);
+      return {
+        ...s,
+        leaveStart: ot?.leaveStart ?? null,
+        leaveEnd: ot?.leaveEnd ?? null,
+        overtime: ot
+          ? {
+              earlyHours: ot.earlyHours,
+              lateHours: ot.lateHours,
+              earlyClassHours: ot.earlyClassHours,
+              lateClassHours: ot.lateClassHours,
+            }
+          : null,
+        handoverEnabled: handover,
+      };
+    });
+    return buildPeriodAllowanceBreakdown(shiftsWithLeave, { midPerShift, nightPerShift });
+  }, [periodShifts, overtimeByDate, midPerShift, nightPerShift, handover]);
 
   const rows = useMemo(() => {
     return overtimeData
@@ -101,11 +121,13 @@ export default function OvertimeScreen() {
     [rows],
   );
 
-  const midPay = midCount * midPerShift;
-  const nightPay = nightCount * nitePerShift;
-  const grandTotal = totals.pay + (handover ? handoverPay : 0) + midPay + nightPay;
+  const allowancePay = allowanceBreakdown.totalPay;
+  const grandTotal = totals.pay + (handover ? handoverPay : 0) + allowancePay;
+  const hasAllowanceRows = allowanceBreakdown.rows.length > 0;
   const hasData =
-    rows.length > 0 || (handover && handoverTotalH > 0) || midPay > 0 || nightPay > 0;
+    rows.length > 0 ||
+    (handover && handoverTotalH > 0) ||
+    hasAllowanceRows;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -236,16 +258,49 @@ export default function OvertimeScreen() {
                 )}
               </View>
             )}
-            {midCount > 0 && midPerShift > 0 && (
-              <View style={styles.line}>
-                <Text style={styles.lineMuted}>中班津貼 {midCount} 次 × ${midPerShift.toLocaleString()}</Text>
-                <Text style={styles.lineViolet}>{fm(midPay)}</Text>
-              </View>
-            )}
-            {nightCount > 0 && nitePerShift > 0 && (
-              <View style={styles.line}>
-                <Text style={styles.lineMuted}>晚班津貼 {nightCount} 次 × ${nitePerShift.toLocaleString()}</Text>
-                <Text style={styles.lineIndigo}>{fm(nightPay)}</Text>
+            {hasAllowanceRows && (
+              <View style={{ marginTop: 4 }}>
+                <View style={styles.line}>
+                  <View style={styles.handRow}>
+                    <Text style={styles.lineMuted}>中班/夜班津貼</Text>
+                    <Pressable
+                      onPress={() => setShowAllowanceDetail((v) => !v)}
+                      style={styles.detailBtn}
+                    >
+                      <Text style={styles.detailBtnText}>明細</Text>
+                      {showAllowanceDetail ? (
+                        <ChevronUp size={14} color={colors.teal} />
+                      ) : (
+                        <ChevronDown size={14} color={colors.teal} />
+                      )}
+                    </Pressable>
+                  </View>
+                  <Text style={styles.lineViolet}>
+                    {midPerShift > 0 || nightPerShift > 0
+                      ? fm(allowancePay)
+                      : "請設定津貼金額"}
+                  </Text>
+                </View>
+                {showAllowanceDetail && (
+                  <View style={styles.allowanceTable}>
+                    <View style={styles.allowanceTableHead}>
+                      <Text style={[styles.allowanceTh, { flex: 1.15 }]}>日期</Text>
+                      <Text style={[styles.allowanceTh, styles.allowanceThMid]}>中班津貼</Text>
+                      <Text style={[styles.allowanceTh, styles.allowanceThMid]}>夜班津貼</Text>
+                    </View>
+                    {allowanceBreakdown.rows.map((row) => (
+                      <View key={row.date} style={styles.allowanceTableRow}>
+                        <Text style={[styles.allowanceTd, { flex: 1.15 }]}>{shortDate(row.date)}</Text>
+                        <Text style={[styles.allowanceTd, styles.allowanceTdMid]}>
+                          {row.midAmount > 0 ? fm(row.midAmount) : "—"}
+                        </Text>
+                        <Text style={[styles.allowanceTd, styles.allowanceTdMid]}>
+                          {row.nightAmount > 0 ? fm(row.nightAmount) : "—"}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
             )}
             <View style={styles.grandRow}>
@@ -346,6 +401,35 @@ const styles = StyleSheet.create({
   detailRow: { flexDirection: "row", justifyContent: "space-between" },
   detailDate: { fontSize: 11, color: colors.muted },
   detailH: { fontSize: 11, fontWeight: "600", color: colors.teal },
+  allowanceTable: {
+    borderLeftWidth: 2,
+    borderLeftColor: "#ddd6fe",
+    marginLeft: 4,
+    marginTop: 6,
+    overflow: "hidden",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  allowanceTableHead: {
+    flexDirection: "row",
+    backgroundColor: "#f8fafc",
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  allowanceTh: { fontSize: 10, fontWeight: "700", color: colors.muted },
+  allowanceThMid: { flex: 1, textAlign: "center" },
+  allowanceTableRow: {
+    flexDirection: "row",
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  allowanceTd: { fontSize: 11, color: colors.text },
+  allowanceTdMid: { flex: 1, textAlign: "center", fontWeight: "600" },
   grandRow: {
     flexDirection: "row",
     justifyContent: "space-between",

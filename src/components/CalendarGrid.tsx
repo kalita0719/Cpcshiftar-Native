@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
 import { Clock, FileText, Palmtree } from "lucide-react-native";
 import {
   addDays,
@@ -20,9 +20,50 @@ import type { Overtime, ShiftItem } from "@/src/types";
 const DAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"];
 const LEAVE_COLOR = "#ec4899";
 const HO = 0.25;
+const SLOT_RADIUS = 12;
+const SHIFT_HOLIDAY_BG = "#f1f5f9";
+const EXT_SLOT_BG_OPACITY = 0.5;
+
+/** 依區塊在堆疊中的位置決定圓角（僅外緣圓角，銜接處維持直角） */
+function blockCorners(top: boolean, bottom: boolean, radius = SLOT_RADIUS): ViewStyle {
+  return {
+    borderTopLeftRadius: top ? radius : 0,
+    borderTopRightRadius: top ? radius : 0,
+    borderBottomLeftRadius: bottom ? radius : 0,
+    borderBottomRightRadius: bottom ? radius : 0,
+  };
+}
 
 function isHolidayLike(shift: ShiftItem) {
   return shift.systemTag === "休假" || shift.name === "休假";
+}
+
+/** 與 slotMid 正班大方塊相同的背景色 */
+function shiftMiddleBackground(shift: ShiftItem): string {
+  return isHolidayLike(shift) ? SHIFT_HOLIDAY_BG : shift.color;
+}
+
+function colorWithOpacity(color: string, opacity = EXT_SLOT_BG_OPACITY): string {
+  const trimmed = color.trim();
+  if (trimmed.startsWith("rgba(")) return trimmed;
+  if (trimmed.startsWith("rgb(")) {
+    const inner = trimmed.slice(4, -1);
+    return `rgba(${inner}, ${opacity})`;
+  }
+  let hex = trimmed.replace(/^#/, "");
+  if (hex.length === 3) hex = hex.replace(/./g, (c) => c + c);
+  if (hex.length === 8) hex = hex.slice(0, 6);
+  if (hex.length !== 6) return color;
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  if ([r, g, b].some((n) => Number.isNaN(n))) return color;
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
+/** 延伸區背景：正班色 + 50% 透明度（僅背景，不影響內文） */
+function shiftExtensionBackground(shift: ShiftItem): string {
+  return colorWithOpacity(shiftMiddleBackground(shift));
 }
 
 export type CalendarGridProps = {
@@ -139,14 +180,10 @@ export default function CalendarGrid({
             isLeave && shift ? leaveCase(shift.startTime, shift.endTime, leaveStart!, leaveEnd!) : 0;
 
           let earlyContent: React.ReactNode = null;
-          if (isLeave && shift && lCase !== 12) {
-            if (lCase === 9) {
-              earlyContent = (
-                <Text style={[styles.extTime, { color: LEAVE_COLOR }]} numberOfLines={1} ellipsizeMode="clip">
-                  {leaveStart}
-                </Text>
-              );
-            } else if (lCase === 10) {
+          let earlySlotBg: string | undefined;
+          if (isLeave && shift && lCase !== 12 && lCase !== 9) {
+            if (lCase === 10) {
+              earlySlotBg = shiftExtensionBackground(shift);
               earlyContent = (
                 <Text style={[styles.extTime, { color: LEAVE_COLOR }]} numberOfLines={1} ellipsizeMode="clip">
                   {leaveEnd}
@@ -157,6 +194,7 @@ export default function CalendarGrid({
             const earlyHours = ot.earlyHours ?? 0;
             const earlyClass = ot.earlyClassHours ?? 0;
             if (earlyHours > 0) {
+              earlySlotBg = shiftExtensionBackground(shift);
               earlyContent = (
                 <View style={styles.extRow}>
                   <Clock size={9} color="#ea580c" />
@@ -166,6 +204,7 @@ export default function CalendarGrid({
                 </View>
               );
             } else if (earlyClass > 0) {
+              earlySlotBg = shiftExtensionBackground(shift);
               earlyContent = (
                 <View style={styles.extRow}>
                   <FileText size={9} color="#2563eb" />
@@ -178,14 +217,10 @@ export default function CalendarGrid({
           }
 
           let lateContent: React.ReactNode = null;
-          if (isLeave && shift && lCase !== 12) {
-            if (lCase === 9) {
-              lateContent = (
-                <Text style={[styles.extTime, { color: LEAVE_COLOR }]} numberOfLines={1} ellipsizeMode="clip">
-                  {leaveEnd}
-                </Text>
-              );
-            } else if (lCase === 11) {
+          let lateSlotBg: string | undefined;
+          if (isLeave && shift && lCase !== 12 && lCase !== 9) {
+            if (lCase === 11) {
+              lateSlotBg = shiftExtensionBackground(shift);
               lateContent = (
                 <Text style={[styles.extTime, { color: LEAVE_COLOR }]} numberOfLines={1} ellipsizeMode="clip">
                   {leaveStart}
@@ -196,6 +231,7 @@ export default function CalendarGrid({
             const lateHours = ot.lateHours ?? 0;
             const lateClass = ot.lateClassHours ?? 0;
             if (lateHours > 0) {
+              lateSlotBg = shiftExtensionBackground(shift);
               lateContent = (
                 <View style={styles.extRow}>
                   <Clock size={9} color="#d97706" />
@@ -205,6 +241,7 @@ export default function CalendarGrid({
                 </View>
               );
             } else if (lateClass > 0) {
+              lateSlotBg = shiftExtensionBackground(shift);
               lateContent = (
                 <View style={styles.extRow}>
                   <FileText size={9} color="#4f46e5" />
@@ -216,7 +253,10 @@ export default function CalendarGrid({
             }
           }
 
-          const showLeaveGhost = !!(isLeave && shift);
+          const showLeaveGhost = !!(isLeave && shift && lCase !== 9);
+          const hasEarlyExt = !!earlySlotBg;
+          const hasLateExt = !!lateSlotBg;
+          const shiftCorners = blockCorners(!hasEarlyExt, !hasLateExt);
 
           let cellBorder: object = styles.cellBorderDefault;
           if (isSelectedScheduleDate) cellBorder = styles.cellSelectedSchedule;
@@ -271,11 +311,25 @@ export default function CalendarGrid({
                   </View>
                 ) : null}
 
-                <View style={styles.slotEarly}>{earlyContent}</View>
+                <View style={styles.slotEarly}>
+                  {earlySlotBg ? (
+                    <View
+                      style={[
+                        StyleSheet.absoluteFill,
+                        { backgroundColor: earlySlotBg },
+                        blockCorners(true, false),
+                      ]}
+                      pointerEvents="none"
+                    />
+                  ) : null}
+                  <View style={styles.extInner}>{earlyContent}</View>
+                </View>
 
                 <View style={styles.slotMid}>
                   {shift && lCase === 9 ? (
-                    <View style={[styles.shiftBadge, { backgroundColor: LEAVE_COLOR }]}>
+                    <View
+                      style={[styles.shiftBadge, shiftCorners, { backgroundColor: LEAVE_COLOR }]}
+                    >
                       <Text style={styles.shiftText} numberOfLines={1} ellipsizeMode="clip">
                         請假
                       </Text>
@@ -284,11 +338,12 @@ export default function CalendarGrid({
                     <View
                       style={[
                         styles.shiftBadge,
+                        shiftCorners,
                         isHolidayLike(shift) ? styles.shiftHoliday : { backgroundColor: shift.color },
                       ]}
                     >
                       <Text
-                        style={[styles.shiftText, isHolidayLike(shift) && { color: colors.muted }]}
+                        style={isHolidayLike(shift) ? styles.shiftTextHoliday : styles.shiftTextWork}
                         numberOfLines={1}
                         ellipsizeMode="clip"
                       >
@@ -300,7 +355,19 @@ export default function CalendarGrid({
                   ) : null}
                 </View>
 
-                <View style={styles.slotLate}>{lateContent}</View>
+                <View style={styles.slotLate}>
+                  {lateSlotBg ? (
+                    <View
+                      style={[
+                        StyleSheet.absoluteFill,
+                        { backgroundColor: lateSlotBg },
+                        blockCorners(false, true),
+                      ]}
+                      pointerEvents="none"
+                    />
+                  ) : null}
+                  <View style={styles.extInner}>{lateContent}</View>
+                </View>
               </View>
             </Pressable>
             );
@@ -420,28 +487,34 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   slotEarly: {
-    flex: 1,
+    flex: 0.33,
     minHeight: 0,
+    alignSelf: "center",
+    width: "90%",
     overflow: "hidden",
-    justifyContent: "center",
-    alignItems: "flex-end",
-    paddingRight: 4,
   },
   slotMid: {
-    flex: 2,
+    flex: 0.25,
     minHeight: 0,
-    overflow: "hidden",
+    zIndex: 10, // 👈 2. 加這行！確保出界的背景蓋在最上層，不會被加班框擋住
     justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 1,
+    alignItems: "stretch",
+    alignSelf: "center",
+    width: "90%",
   },
   slotLate: {
-    flex: 1,
+    flex: 0.33,
     minHeight: 0,
+    alignSelf: "center",
+    width: "90%",
     overflow: "hidden",
+  },
+  extInner: {
+    flex: 1,
+    width: "100%",
     justifyContent: "center",
-    alignItems: "flex-end",
-    paddingRight: 4,
+    alignItems: "center",
+    paddingBottom: 0,
   },
   extRow: {
     flexDirection: "row",
@@ -451,26 +524,31 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   extTime: {
-    fontSize: 10,
-    lineHeight: 12,
+    fontSize: 6.6,
+    lineHeight: 7,
     fontWeight: "600",
     flexShrink: 1,
-    textAlign: "right",
+    textAlign: "center",
   },
   shiftBadge: {
-    borderRadius: 6,
-    paddingVertical: 3,
-    paddingHorizontal: 3,
+    position: "absolute", // 👈 3. 大絕招：絕對定位！不被父框框限制
+    top: -6.5,             // 👈 4. 往上突破 12 像素 (覺得不夠長可以改 -15)
+    bottom: -6.5,          // 👈 5. 往下突破 12 像素 (覺得不夠長可以改 -15)
+    left: 0,
+    right: 0,
+    borderRadius: 12,     // 👈 6. 直接在這裡給它漂亮的膠囊圓角！
     alignItems: "center",
     justifyContent: "center",
-    maxWidth: "100%",
-    overflow: "hidden",
+    // overflow: "hidden", // 🚫 這裡如果有這行，也請刪除
   },
   shiftHoliday: {
-    backgroundColor: "#f1f5f9",
+    backgroundColor: SHIFT_HOLIDAY_BG,
     borderWidth: 1,
     borderColor: colors.border,
   },
   shiftText: { color: "#fff", fontSize: 13, fontWeight: "700", textAlign: "center" },
+  /** 正班（有色底）：黑字、略小 */
+  shiftTextWork: { color: colors.muted, fontSize: 9, fontWeight: "500", textAlign: "center" },
+  shiftTextHoliday: { color: colors.muted, fontSize: 9, fontWeight: "500", textAlign: "center" },
   plusPlaceholder: { flex: 1, width: "100%", minHeight: 8 },
 });
