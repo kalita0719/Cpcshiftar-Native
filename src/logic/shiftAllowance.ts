@@ -68,6 +68,12 @@ function timeCoord(timeStr: string, shiftStartMin: number): number {
   return min >= shiftStartMin ? min : min + 1440;
 }
 
+/** 上班起點座標；case 11 交接班提早若落在下一圈，改以班表上班為準 */
+function workStartCoord(scEff: number, sc: number): number {
+  if (scEff >= sc && scEff < DAY) return scEff;
+  return sc;
+}
+
 /** 班次分鐘區間；end <= start 視為跨日，end += 1440 */
 export function shiftMinuteRange(startTime: string, endTime: string): { start: number; end: number } {
   let start = timeToMin(startTime);
@@ -152,7 +158,7 @@ function qualifiesNightFromAbsoluteRanges(workRanges: AbsoluteRange[], shiftDate
   const base = parseYMD(shiftDate);
   for (let delta = -1; delta <= 1; delta++) {
     const d = formatYMD(addDays(base, delta));
-    if (nightMinutesOnAbsoluteCalendarDate(workRanges, d) > NIGHT_MIN_WORK) return true;
+    if (nightMinutesOnAbsoluteCalendarDate(workRanges, d) >= NIGHT_MIN_WORK) return true;
   }
   return false;
 }
@@ -245,10 +251,7 @@ export function resolveEffectiveShiftTimes(
     const lc = leaveCase(shift.startTime, shift.endTime, leaveStart, leaveEnd);
     if (lc === 10) endTime = shiftTime(endTime, ho);
     else if (lc === 11) startTime = shiftTime(startTime, -ho);
-    else if (lc === 12) {
-      startTime = shiftTime(startTime, -ho);
-      endTime = shiftTime(endTime, ho);
-    }
+    else if (lc === 12) endTime = shiftTime(endTime, ho);
   }
   return { startTime, endTime };
 }
@@ -287,11 +290,13 @@ export function workSegmentsAfterLeave(
     return lec < ecWork ? [{ start: lec, end: ecWork }] : [];
   }
   if (lc === 11) {
-    return scEff < lsc ? [{ start: scEff, end: lsc }] : [];
+    const start = workStartCoord(scEff, sc);
+    return start < lsc ? [{ start, end: lsc }] : [];
   }
 
   const segs: MinuteSegment[] = [];
-  if (scEff < lsc) segs.push({ start: scEff, end: lsc });
+  const segStart = workStartCoord(scEff, sc);
+  if (segStart < lsc) segs.push({ start: segStart, end: lsc });
   if (lec < ecWork) segs.push({ start: lec, end: ecWork });
   return segs;
 }
@@ -305,7 +310,7 @@ function qualifiesMiddleInToday(today: MinuteSegment): boolean {
 }
 
 function qualifiesNightInWindow(segStart: number, segEnd: number, winStart: number, winEnd: number): boolean {
-  return intersectLen(segStart, segEnd, winStart, winEnd) > NIGHT_MIN_WORK;
+  return intersectLen(segStart, segEnd, winStart, winEnd) >= NIGHT_MIN_WORK;
 }
 
 function qualifiesMiddleFromSegments(segments: MinuteSegment[]): boolean {
@@ -338,7 +343,7 @@ function applyCrossDayOverride(segments: MinuteSegment[], hasMiddle: boolean, ha
     if (tom) tomorrowNightWork += intersectLen(tom.start, tom.end, DAY, NIGHT_TOMORROW_END);
   }
 
-  if (tomorrowNightWork <= NIGHT_MIN_WORK) {
+  if (tomorrowNightWork < NIGHT_MIN_WORK) {
     return { hasMiddleAllowance: false, hasNightAllowance: true };
   }
   return { hasMiddleAllowance: true, hasNightAllowance: hasNight };
@@ -398,7 +403,7 @@ function resolveNightAllowanceDate(shiftDate: string, workRanges: AbsoluteRange[
   for (let delta = -1; delta <= 1; delta++) {
     const d = formatYMD(addDays(base, delta));
     const mins = nightMinutesOnAbsoluteCalendarDate(workRanges, d);
-    if (mins > NIGHT_MIN_WORK && mins > bestMins) {
+    if (mins >= NIGHT_MIN_WORK && mins > bestMins) {
       bestMins = mins;
       bestDate = d;
     }
