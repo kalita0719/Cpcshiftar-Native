@@ -11,6 +11,7 @@ import {
 import { X } from "lucide-react-native";
 import { cardShadow, colors } from "@/src/components/theme";
 import { SHIFT_PRESET_COLORS } from "@/src/constants/shiftPresetColors";
+import WheelTimePicker, { snapTimeToQuarter } from "@/src/components/WheelTimePicker";
 import { useAppData } from "@/src/state/AppDataContext";
 import type { ShiftTemplate } from "@/src/types";
 
@@ -39,8 +40,8 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
         setStartTime("");
         setEndTime("");
       } else {
-        setStartTime(editTemplate.startTime ?? "09:00");
-        setEndTime(editTemplate.endTime ?? "17:00");
+        setStartTime(snapTimeToQuarter(editTemplate.startTime ?? "09:00"));
+        setEndTime(snapTimeToQuarter(editTemplate.endTime ?? "17:00"));
       }
       setNotes(editTemplate.notes ?? "");
     } else {
@@ -85,13 +86,15 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
               <X size={22} color={colors.text} />
             </Pressable>
           </View>
-          <ScrollView keyboardShouldPersistTaps="handled">
-            {systemBadge ? (
-              <View style={styles.sysBadge}>
-                <Text style={styles.sysBadgeText}>系統屬性：{systemBadge}</Text>
-              </View>
-            ) : null}
-            <Text style={styles.label}>模板名稱（選填）</Text>
+          <View style={styles.body}>
+            <View style={styles.nameLabelRow}>
+              <Text style={[styles.label, styles.labelInRow]}>模板名稱（選填）</Text>
+              {systemBadge ? (
+                <View style={styles.sysBadge}>
+                  <Text style={styles.sysBadgeText}>系統屬性：{systemBadge}</Text>
+                </View>
+              ) : null}
+            </View>
             <TextInput
               value={name}
               onChangeText={setName}
@@ -100,7 +103,12 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
               placeholderTextColor={colors.muted}
             />
             <Text style={styles.label}>顏色</Text>
-            <View style={styles.colors}>
+            <ScrollView
+              horizontal
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.colorsRow}
+            >
               {SHIFT_PRESET_COLORS.map((c, i) => (
                 <Pressable
                   key={`preset-${i}`}
@@ -112,16 +120,16 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
                   ]}
                 />
               ))}
-            </View>
+            </ScrollView>
             {!leaveEdit ? (
               <View style={styles.row2}>
-                <View style={{ flex: 1 }}>
+                <View style={styles.timeCol}>
                   <Text style={styles.label}>開始</Text>
-                  <TextInput value={startTime} onChangeText={setStartTime} style={styles.input} />
+                  <WheelTimePicker value={startTime} onChange={setStartTime} />
                 </View>
-                <View style={{ flex: 1 }}>
+                <View style={styles.timeCol}>
                   <Text style={styles.label}>結束</Text>
-                  <TextInput value={endTime} onChangeText={setEndTime} style={styles.input} />
+                  <WheelTimePicker value={endTime} onChange={setEndTime} />
                 </View>
               </View>
             ) : null}
@@ -135,7 +143,7 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
             <Pressable onPress={submit} style={styles.submit}>
               <Text style={styles.submitText}>儲存</Text>
             </Pressable>
-          </ScrollView>
+          </View>
         </View>
       </View>
     </Modal>
@@ -148,39 +156,50 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: 20,
     padding: 20,
-    maxHeight: "85%",
+    width: "100%",
+    maxWidth: 400,
+    alignSelf: "center",
   },
-  head: { flexDirection: "row", justifyContent: "space-between", marginBottom: 16 },
+  head: { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
+  body: { flexGrow: 0 },
   hTitle: { fontSize: 18, fontWeight: "700", color: colors.text },
+  nameLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    marginBottom: 6,
+  },
   sysBadge: {
-    alignSelf: "flex-start",
+    flexShrink: 0,
     backgroundColor: "#f1f5f9",
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
-    marginBottom: 4,
   },
   sysBadgeText: { fontSize: 12, fontWeight: "600", color: "#64748b" },
-  label: { fontSize: 12, fontWeight: "600", color: colors.muted, marginBottom: 6, marginTop: 10 },
+  label: { fontSize: 12, fontWeight: "600", color: colors.muted, marginTop: 8, marginBottom: 4 },
+  labelInRow: { marginTop: 0, marginBottom: 0 },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     fontSize: 15,
     color: colors.text,
     backgroundColor: "#fafafa",
   },
-  colors: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  colorsRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 2 },
   colorDot: { width: 32, height: 32, borderRadius: 16 },
   colorDotRing: { borderWidth: 3, borderColor: colors.text },
   row2: { flexDirection: "row", gap: 12 },
+  timeCol: { flex: 1, minWidth: 0 },
   submit: {
-    marginTop: 20,
+    marginTop: 12,
     backgroundColor: colors.teal,
     borderRadius: 14,
-    paddingVertical: 14,
+    paddingVertical: 12,
     alignItems: "center",
   },
   submitText: { color: "#fff", fontWeight: "700", fontSize: 16 },

@@ -14,14 +14,13 @@ import { Trash2, X } from "lucide-react-native";
 import { timeToMin } from "@/src/logic/shiftLogic";
 import { cardShadow, colors } from "@/src/components/theme";
 import { useAppData } from "@/src/state/AppDataContext";
+import { clampOvertimeNote, OVERTIME_NOTE_MAX_LENGTH } from "@/src/constants/overtimeNotes";
 import type { Overtime, ShiftItem } from "@/src/types";
 
 const MAX_H = 5;
 const MIN_H = -5;
 const STEP = 0.5;
 const HO = 0.25;
-const LEAVE_COLOR = "#ec4899";
-
 /* ── 時間工具 ─────────────────────────────────────────────── */
 function minToTimeStr(min: number): string {
   const total = ((Math.round(min) % 1440) + 1440) % 1440;
@@ -53,8 +52,199 @@ function formatDateLabel(dateStr: string) {
   return `${dateStr} (${DAY_MAP[d.getDay()]})`;
 }
 
-const OT_THUMB = 22;
+const THUMB = 22;
+const LEAVE_STEP_MIN = 30;
+const LEAVE_LABEL_W = 20;
 const OT_TRACK_H = 8;
+const OT_RULER_VALS = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5] as const;
+const RULER_NUM_H = 18;
+const RULER_GAP = 4;
+const TICK_MAJOR_H = 10;
+const TICK_MINOR_H = 5;
+
+const rulerLabelStyle = {
+  lineHeight: RULER_NUM_H,
+  textAlign: "center" as const,
+  includeFontPadding: false,
+};
+
+const OT_TICKS: { v: number; major: boolean }[] = [];
+for (let i = 0; i <= (MAX_H - MIN_H) / STEP; i++) {
+  const v = Math.round((MIN_H + i * STEP) * 100) / 100;
+  OT_TICKS.push({ v, major: Number.isInteger(v) });
+}
+
+function otValueToX(v: number, trackW: number): number {
+  const trackInner = Math.max(trackW - THUMB, 1);
+  return THUMB / 2 + ((v - MIN_H) / (MAX_H - MIN_H)) * trackInner;
+}
+
+/** 與 MultiSlider（min/max/step）相同的離散刻度。 */
+function buildLeaveOptions(maxPos: number, step = LEAVE_STEP_MIN): number[] {
+  const options: number[] = [];
+  for (let v = 0; v <= maxPos; v += step) options.push(v);
+  return options;
+}
+
+/** 預設請假區間：整段上班時間（對齊 30 分鐘刻度）。 */
+function defaultFullLeaveRange(shiftDurationMin: number): [number, number] {
+  const options = buildLeaveOptions(shiftDurationMin);
+  const end = options[options.length - 1] ?? 0;
+  return end > 0 ? [0, end] : [0, 0];
+}
+
+/** 與 @ptomasroos/react-native-multi-slider 的 valueToPosition 一致，對齊圓點中心。 */
+function leaveValueToX(value: number, sliderLength: number, options: number[]): number {
+  if (options.length <= 1) return 0;
+  let index = options.indexOf(value);
+  if (index < 0) {
+    index = options.reduce(
+      (best, v, i) => (Math.abs(v - value) < Math.abs(options[best]! - value) ? i : best),
+      0,
+    );
+  }
+  return (sliderLength * index) / (options.length - 1);
+}
+
+/** 請假刻度標籤：只顯示「時」，不顯示分。 */
+function leaveHourLabel(timeStr: string): string {
+  const h = parseInt(timeStr.split(":")[0] ?? "0", 10);
+  return String(Number.isNaN(h) ? 0 : h);
+}
+
+function leaveHourLabelAtPos(pos: number, shiftStartMin: number): string {
+  const abs = (shiftStartMin + pos) % 1440;
+  return String(Math.floor(abs / 60) % 24);
+}
+
+function RulerTickLine({ x, top, major }: { x: number; top: number; major: boolean }) {
+  const h = major ? TICK_MAJOR_H : TICK_MINOR_H;
+  return (
+    <View
+      style={{
+        position: "absolute",
+        left: x - 0.75,
+        top,
+        width: 1.5,
+        height: h,
+        backgroundColor: major ? "#94a3b8" : "#cbd5e1",
+        borderRadius: 0.75,
+      }}
+    />
+  );
+}
+
+/** 加班／上課刻度：與圓點使用相同 X 換算 */
+function OtRuler({ trackW }: { trackW: number }) {
+  return (
+    <View style={{ width: trackW, marginBottom: 4 }}>
+      <View style={{ width: trackW, height: RULER_NUM_H, position: "relative" }}>
+        {OT_RULER_VALS.map((v) => (
+          <Text
+            key={v}
+            style={[
+              styles.rulerNum,
+              rulerLabelStyle,
+              {
+                position: "absolute",
+                top: 0,
+                left: otValueToX(v, trackW) - 7,
+                width: 14,
+              },
+            ]}
+          >
+            {Math.abs(v)}
+          </Text>
+        ))}
+      </View>
+      <View style={{ height: RULER_GAP }} />
+      <View style={{ width: trackW, height: TICK_MAJOR_H, position: "relative" }}>
+        {OT_TICKS.map(({ v, major }) => (
+          <RulerTickLine key={v} x={otValueToX(v, trackW)} top={0} major={major} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+/** 請假刻度：當日上班起訖；標籤僅顯示「時」；最小刻度 30 分鐘；與滑桿圓點對齊。 */
+function LeaveRuler({
+  trackW,
+  shiftStartMin,
+  shift,
+  leaveOptions,
+}: {
+  trackW: number;
+  shiftStartMin: number;
+  shift: ShiftItem;
+  leaveOptions: number[];
+}) {
+  const hourMarks = useMemo(() => {
+    const lastPos = leaveOptions[leaveOptions.length - 1] ?? 0;
+    const marks: { pos: number; label: string }[] = [];
+    for (const pos of leaveOptions) {
+      const isStart = pos === 0;
+      const isEnd = pos === lastPos;
+      const onClockHour = ((shiftStartMin + pos) % 1440) % 60 === 0;
+      if (!isStart && !isEnd && !onClockHour) continue;
+
+      const label = isStart
+        ? leaveHourLabel(shift.startTime)
+        : isEnd
+          ? leaveHourLabel(shift.endTime)
+          : leaveHourLabelAtPos(pos, shiftStartMin);
+      marks.push({ pos, label });
+    }
+    return marks;
+  }, [leaveOptions, shift.startTime, shift.endTime, shiftStartMin]);
+
+  const leaveTicks = useMemo(() => {
+    const lastPos = leaveOptions[leaveOptions.length - 1] ?? 0;
+    return leaveOptions.map((pos) => ({
+      pos,
+      major: pos === 0 || pos === lastPos || ((shiftStartMin + pos) % 1440) % 60 === 0,
+    }));
+  }, [leaveOptions, shiftStartMin]);
+
+  return (
+    <View style={{ width: trackW, marginBottom: 4 }}>
+      <View style={{ width: trackW, height: RULER_NUM_H, position: "relative", overflow: "visible" }}>
+        {hourMarks.map(({ pos, label }) => {
+          const x = leaveValueToX(pos, trackW, leaveOptions);
+          return (
+            <Text
+              key={`leave-label-${pos}`}
+              numberOfLines={1}
+              ellipsizeMode="clip"
+              style={[
+                styles.rulerNum,
+                rulerLabelStyle,
+                styles.leaveRulerLabel,
+                {
+                  left: x,
+                  transform: [{ translateX: -LEAVE_LABEL_W / 2 }],
+                },
+              ]}
+            >
+              {label}
+            </Text>
+          );
+        })}
+      </View>
+      <View style={{ height: RULER_GAP }} />
+      <View style={{ width: trackW, height: TICK_MAJOR_H, position: "relative" }}>
+        {leaveTicks.map(({ pos, major }) => (
+          <RulerTickLine
+            key={`leave-tick-${pos}`}
+            x={leaveValueToX(pos, trackW, leaveOptions)}
+            top={0}
+            major={major}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
 
 /** 加班／上課：以 0 為中心，僅點亮 0 與圓點之間的軌道 */
 function OtCenterSlider({
@@ -68,16 +258,13 @@ function OtCenterSlider({
   color: string;
   trackW: number;
 }) {
-  const trackInner = Math.max(trackW - OT_THUMB, 1);
+  const trackInner = Math.max(trackW - THUMB, 1);
 
-  const valueToX = useCallback(
-    (v: number) => OT_THUMB / 2 + ((v - MIN_H) / (MAX_H - MIN_H)) * trackInner,
-    [trackInner],
-  );
+  const valueToX = useCallback((v: number) => otValueToX(v, trackW), [trackW]);
 
   const xToValue = useCallback(
     (x: number) => {
-      const t = Math.max(0, Math.min(1, (x - OT_THUMB / 2) / trackInner));
+      const t = Math.max(0, Math.min(1, (x - THUMB / 2) / trackInner));
       const raw = MIN_H + t * (MAX_H - MIN_H);
       return Math.round(raw / STEP) * STEP;
     },
@@ -91,7 +278,7 @@ function OtCenterSlider({
   const setFromPageX = useCallback(
     (pageX: number) => {
       wrapRef.current?.measure((_x, _y, width, _h, pageLeft) => {
-        const localX = Math.max(OT_THUMB / 2, Math.min(pageX - pageLeft, width - OT_THUMB / 2));
+        const localX = Math.max(THUMB / 2, Math.min(pageX - pageLeft, width - THUMB / 2));
         onChange(xToValue(localX));
       });
     },
@@ -122,14 +309,14 @@ function OtCenterSlider({
   return (
     <View
       ref={wrapRef}
-      style={{ width: trackW, height: OT_THUMB, justifyContent: "center" }}
+      style={{ width: trackW, height: THUMB, justifyContent: "center" }}
       {...pan.panHandlers}
     >
       <View
         style={{
           position: "absolute",
-          left: OT_THUMB / 2,
-          right: OT_THUMB / 2,
+          left: THUMB / 2,
+          right: THUMB / 2,
           height: OT_TRACK_H,
           borderRadius: 4,
           backgroundColor: "#e2e8f0",
@@ -142,7 +329,7 @@ function OtCenterSlider({
             height: OT_TRACK_H,
             borderRadius: 4,
             backgroundColor: color,
-            top: (OT_THUMB - OT_TRACK_H) / 2,
+            top: (THUMB - OT_TRACK_H) / 2,
             ...fillStyle,
           }}
         />
@@ -153,7 +340,7 @@ function OtCenterSlider({
           left: centerX - 1,
           width: 2,
           height: OT_TRACK_H + 4,
-          top: (OT_THUMB - OT_TRACK_H) / 2 - 2,
+          top: (THUMB - OT_TRACK_H) / 2 - 2,
           backgroundColor: "#94a3b8",
           borderRadius: 1,
         }}
@@ -161,10 +348,10 @@ function OtCenterSlider({
       <View
         style={{
           position: "absolute",
-          left: thumbX - OT_THUMB / 2,
-          width: OT_THUMB,
-          height: OT_THUMB,
-          borderRadius: OT_THUMB / 2,
+          left: thumbX - THUMB / 2,
+          width: THUMB,
+          height: THUMB,
+          borderRadius: THUMB / 2,
           backgroundColor: color,
           shadowColor: color,
           shadowOffset: { width: 0, height: 2 },
@@ -185,8 +372,8 @@ function LeaveThumb() {
         width: 22,
         height: 22,
         borderRadius: 11,
-        backgroundColor: LEAVE_COLOR,
-        shadowColor: LEAVE_COLOR,
+        backgroundColor: colors.leave,
+        shadowColor: colors.leave,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.35,
         shadowRadius: 4,
@@ -216,7 +403,7 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
   // 加班：單值，正數=延時，負數=提早
   const [sliderValue, setSliderValue] = useState(0);
   // 請假：[startPos, endPos]，單位 = 分鐘（相對班次開始）
-  const [leaveRange, setLeaveRange] = useState<[number, number]>([0, 480]);
+  const [leaveRange, setLeaveRange] = useState<[number, number]>([0, 0]);
   const [notes, setNotes] = useState("");
   // 容器寬度供加班軌道繪製
   const [trackW, setTrackW] = useState(280);
@@ -229,6 +416,11 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
       ? shiftEndMin - shiftStartMin
       : 1440 - shiftStartMin + shiftEndMin;
   }, [shift, shiftStartMin, shiftEndMin]);
+
+  const leaveOptions = useMemo(
+    () => buildLeaveOptions(shiftDurationMin, LEAVE_STEP_MIN),
+    [shiftDurationMin],
+  );
 
   /* ── 打開彈窗時還原既有紀錄 ── */
   useEffect(() => {
@@ -253,23 +445,24 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
     } else {
       setTab("加班");
       setSliderValue(0);
+      setLeaveRange(defaultFullLeaveRange(shiftDurationMin));
     }
-    setNotes(existing?.notes ?? "");
-  }, [visible, existing, shiftStartMin]);
+    setNotes(clampOvertimeNote(existing?.notes ?? ""));
+  }, [visible, existing, shiftStartMin, shiftDurationMin]);
 
-  /* ── 切到「請假」tab 時預設全程 ── */
+  /* ── 切到「請假」tab 時：無既有請假則預設整段上班時間 */
   useEffect(() => {
-    if (tab === "請假" && !existing?.leaveStart) {
-      setLeaveRange([0, shiftDurationMin]);
+    if (tab === "請假" && !existing?.leaveStart && shift) {
+      setLeaveRange(defaultFullLeaveRange(shiftDurationMin));
     }
-  }, [tab, existing?.leaveStart, shiftDurationMin]);
+  }, [tab, existing?.leaveStart, shift, shiftDurationMin]);
 
   /* ── 加班 derived ── */
   const hours = Math.abs(sliderValue);
   const isEarly = sliderValue < 0;
   const isLate = sliderValue > 0;
   const direction = isEarly ? "提早" : isLate ? "延時" : "";
-  const typeColor = tab === "加班" ? "#f97316" : tab === "上課" ? "#3b82f6" : LEAVE_COLOR;
+  const typeColor = tab === "加班" ? "#f97316" : tab === "上課" ? "#3b82f6" : colors.leave;
   const baseStart = shift?.startTime ?? "--:--";
   const baseEnd = shift?.endTime ?? "--:--";
   const dispStart = isEarly ? shiftTimeStr(baseStart, sliderValue - ho) : baseStart;
@@ -287,32 +480,46 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
   };
 
   /* ── 儲存 ── */
-  const canSaveLeave = tab === "請假" && !!shift && leaveEndPos > leaveStartPos;
-  const canSaveOt = tab !== "請假" && hours > 0;
-  const canSave = tab === "請假" ? canSaveLeave : canSaveOt;
+  const trimmedNotes = clampOvertimeNote(notes.trim());
+  const hasNotes = trimmedNotes.length > 0;
+  const savingLeave = tab === "請假" && !!shift && leaveEndPos > leaveStartPos;
+  const savingOtHours = tab !== "請假" && hours > 0;
+  const canSave = savingLeave || savingOtHours || hasNotes;
 
   const save = () => {
-    if (tab === "請假") {
-      upsertOvertime({
-        date,
-        earlyHours: existing?.earlyHours ?? 0,
-        lateHours: existing?.lateHours ?? 0,
-        earlyClassHours: existing?.earlyClassHours ?? 0,
-        lateClassHours: existing?.lateClassHours ?? 0,
-        leaveStart: leaveStartTimeStr,
-        leaveEnd: leaveEndTimeStr,
-        notes: notes || undefined,
-      });
-    } else {
-      upsertOvertime({
-        date,
-        earlyHours: tab === "加班" && isEarly ? hours : 0,
-        lateHours: tab === "加班" && isLate ? hours : 0,
-        earlyClassHours: tab === "上課" && isEarly ? hours : 0,
-        lateClassHours: tab === "上課" && isLate ? hours : 0,
-        notes: notes || undefined,
-      });
+    if (!canSave) return;
+
+    const payload = {
+      date,
+      earlyHours: existing?.earlyHours ?? 0,
+      lateHours: existing?.lateHours ?? 0,
+      earlyClassHours: existing?.earlyClassHours ?? 0,
+      lateClassHours: existing?.lateClassHours ?? 0,
+      leaveStart: existing?.leaveStart ?? null,
+      leaveEnd: existing?.leaveEnd ?? null,
+      notes: trimmedNotes || undefined,
+    };
+
+    if (savingLeave) {
+      payload.leaveStart = leaveStartTimeStr;
+      payload.leaveEnd = leaveEndTimeStr;
     }
+
+    if (savingOtHours) {
+      if (tab === "加班") {
+        payload.earlyHours = isEarly ? hours : 0;
+        payload.lateHours = isLate ? hours : 0;
+        payload.earlyClassHours = 0;
+        payload.lateClassHours = 0;
+      } else {
+        payload.earlyClassHours = isEarly ? hours : 0;
+        payload.lateClassHours = isLate ? hours : 0;
+        payload.earlyHours = 0;
+        payload.lateHours = 0;
+      }
+    }
+
+    upsertOvertime(payload);
     onClose();
   };
 
@@ -320,8 +527,6 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
     deleteOvertimeByDate(date);
     onClose();
   };
-
-  const rulerVals = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -349,7 +554,7 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
                   styles.tab,
                   tab === t && {
                     backgroundColor:
-                      t === "加班" ? "#f97316" : t === "上課" ? "#3b82f6" : LEAVE_COLOR,
+                      t === "加班" ? "#f97316" : t === "上課" ? "#3b82f6" : colors.leave,
                   },
                 ]}
               >
@@ -363,22 +568,21 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
             <>
               <View style={styles.timeLine}>
                 {hours > 0 ? (
-                  <Text style={[styles.bigTime, { color: typeColor }]}>
-                    {dispStart} — {dispEnd}{"  "}{direction} {hours}h
-                  </Text>
+                  <>
+                    <Text style={[styles.bigTime, { color: typeColor }]}>
+                      {dispStart} — {dispEnd}
+                    </Text>
+                    <Text style={[styles.otHoursLine, { color: typeColor }]}>
+                      {direction} {hours}h
+                    </Text>
+                  </>
                 ) : (
                   <Text style={styles.mutedTime}>{baseStart} — {baseEnd}</Text>
                 )}
               </View>
 
-              {/* 刻度標籤 */}
-              <View style={styles.rulerRow}>
-                {rulerVals.map((v) => (
-                  <Text key={v} style={styles.rulerNum}>{Math.abs(v)}</Text>
-                ))}
-              </View>
-
               <View style={styles.sliderWrap} onLayout={onTrackLayout}>
+                <OtRuler trackW={trackW} />
                 <OtCenterSlider
                   value={sliderValue}
                   onChange={setSliderValue}
@@ -397,32 +601,33 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
               ) : (
                 <>
                   <View style={styles.timeLine}>
-                    <Text style={[styles.bigTime, { color: LEAVE_COLOR }]}>
+                    <Text style={[styles.bigTime, { color: colors.leave }]}>
                       {leaveStartTimeStr} — {leaveEndTimeStr}{"  "}請假{" "}
                       {Math.round((leaveEndPos - leaveStartPos) / 30) / 2}h
                     </Text>
                   </View>
 
-                  {/* 班次起訖標籤 */}
-                  <View style={styles.leaveEdges}>
-                    <Text style={styles.edgeText}>{shift.startTime}</Text>
-                    <Text style={styles.edgeText}>{shift.endTime}</Text>
-                  </View>
-
-                  {/* ← MultiSlider 雙拇指：兩個拇指各有獨立 PanResponder，不互相干擾 */}
                   <View style={styles.sliderWrap} onLayout={onTrackLayout}>
+                    <LeaveRuler
+                      trackW={trackW}
+                      shiftStartMin={shiftStartMin}
+                      shift={shift}
+                      leaveOptions={leaveOptions}
+                    />
                     <MultiSlider
                       values={[leaveStartPos, leaveEndPos]}
                       min={0}
                       max={shiftDurationMin}
-                      step={30}            // 每步 30 分鐘
-                      sliderLength={trackW - 4}
+                      step={LEAVE_STEP_MIN}
+                      sliderLength={trackW}
+                      // @ts-expect-error markerSize 執行期支援，型別定義未更新
+                      markerSize={THUMB}
                       onValuesChange={(vals) => {
                         setLeaveRange([vals[0], vals[1]]);
                       }}
-                      selectedStyle={{ backgroundColor: LEAVE_COLOR }}
+                      selectedStyle={{ backgroundColor: colors.leave }}
                       unselectedStyle={{ backgroundColor: "#e2e8f0" }}
-                      containerStyle={{ alignSelf: "center" }}
+                      containerStyle={{ alignSelf: "flex-start", width: trackW }}
                       trackStyle={{ height: 8, borderRadius: 4 }}
                       customMarker={() => <LeaveThumb />}
                       allowOverlap={false}
@@ -443,9 +648,10 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
           {/* 備註 */}
           <TextInput
             value={notes}
-            onChangeText={setNotes}
-            placeholder="備註（選填）"
+            onChangeText={(t) => setNotes(clampOvertimeNote(t))}
+            placeholder={`備註（選填，最多 ${OVERTIME_NOTE_MAX_LENGTH} 字）`}
             placeholderTextColor={colors.muted}
+            maxLength={OVERTIME_NOTE_MAX_LENGTH}
             style={styles.notes}
           />
 
@@ -509,26 +715,27 @@ const styles = StyleSheet.create({
   },
   tab: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center" },
   tabText: { fontSize: 13, fontWeight: "700", color: colors.muted },
-  timeLine: { minHeight: 36, justifyContent: "center", marginBottom: 8, alignItems: "center" },
-  bigTime: { fontSize: 17, fontWeight: "700", textAlign: "center" },
-  mutedTime: { fontSize: 15, color: colors.muted, textAlign: "center" },
-  rulerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 2,
-    marginBottom: 2,
-  },
-  rulerNum: { fontSize: 10, color: "#94a3b8" },
-  sliderWrap: {
-    alignItems: "center",
-    paddingHorizontal: 2,
+  timeLine: {
+    minHeight: 36,
+    justifyContent: "center",
     marginBottom: 8,
+    alignItems: "center",
+    gap: 4,
   },
-  leaveEdges: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 4,
-    marginBottom: 2,
+  bigTime: { fontSize: 17, fontWeight: "700", textAlign: "center" },
+  otHoursLine: { fontSize: 15, fontWeight: "700", textAlign: "center" },
+  mutedTime: { fontSize: 13, color: colors.muted, textAlign: "center" },
+  rulerNum: { fontSize: 10, color: "#94a3b8" },
+  leaveRulerLabel: {
+    position: "absolute",
+    top: 0,
+    width: LEAVE_LABEL_W,
+    textAlign: "center",
+  },
+  sliderWrap: {
+    alignSelf: "stretch",
+    marginBottom: 8,
+    overflow: "visible",
   },
   edgeText: { fontSize: 10, color: colors.muted, fontWeight: "600" },
   leaveLabels: {
@@ -537,7 +744,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     marginTop: 4,
   },
-  leaveLabel: { color: LEAVE_COLOR, fontSize: 11, fontWeight: "700" },
+  leaveLabel: { color: colors.leave, fontSize: 11, fontWeight: "700" },
   warn: { textAlign: "center", color: colors.muted, paddingVertical: 12, fontSize: 13 },
   notes: {
     borderRadius: 12,

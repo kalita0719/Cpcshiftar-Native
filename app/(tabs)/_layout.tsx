@@ -1,9 +1,13 @@
-import { Tabs } from "expo-router";
-import React from "react";
-import { Text } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Banknote, Calendar, Clock, LayoutGrid } from "lucide-react-native";
 import { colors } from "@/src/components/theme";
+import { Tabs } from "expo-router";
+import { LayoutGrid } from "lucide-react-native";
+
+const TAB_CALENDAR_EMOJI = "\u{1F5D3}\u{FE0F}";
+const TAB_OVERTIME_EMOJI = "\u{1F4CA}";
+const TAB_SHIFTS_EMOJI = "\u{2699}\u{FE0F}";
+import React from "react";
+import { Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 function TabIcon({
   name,
@@ -20,11 +24,23 @@ function TabIcon({
     case "home":
       return <LayoutGrid size={size} color={stroke} />;
     case "calendar":
-      return <Calendar size={size} color={stroke} />;
+      return (
+        <Text style={{ fontSize: size, lineHeight: size + 2, textAlign: "center" }} allowFontScaling={false}>
+          {TAB_CALENDAR_EMOJI}
+        </Text>
+      );
     case "overtime":
-      return <Banknote size={size} color={stroke} />;
+      return (
+        <Text style={{ fontSize: size, lineHeight: size + 2, textAlign: "center" }} allowFontScaling={false}>
+          {TAB_OVERTIME_EMOJI}
+        </Text>
+      );
     case "shifts":
-      return <Clock size={size} color={stroke} />;
+      return (
+        <Text style={{ fontSize: size, lineHeight: size + 2, textAlign: "center" }} allowFontScaling={false}>
+          {TAB_SHIFTS_EMOJI}
+        </Text>
+      );
     default:
       return null;
   }
@@ -43,12 +59,25 @@ export default function TabLayout() {
         tabBarActiveTintColor: "#fff",
         tabBarInactiveTintColor: colors.muted,
         sceneStyle: { flex: 1, backgroundColor: colors.greyBg },
+        tabBarBackground: () => (
+          <View style={{ flex: 1 }}>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: colors.card,
+                borderTopWidth: 1,
+                borderTopColor: colors.border,
+              }}
+            />
+            <View style={{ height: tabPaddingBottom, backgroundColor: "#000000" }} />
+          </View>
+        ),
         tabBarStyle: {
-          backgroundColor: colors.card,
-          borderTopColor: colors.border,
+          backgroundColor: "transparent",
+          borderTopWidth: 0,
           height: tabHeight,
           paddingBottom: tabPaddingBottom,
-          paddingTop: 8,
+          paddingTop: 0,
           elevation: 12,
           shadowColor: "#000",
           shadowOffset: { width: 0, height: -2 },
@@ -56,7 +85,7 @@ export default function TabLayout() {
           shadowRadius: 8,
         },
         tabBarLabel: ({ focused, color, children }) => (
-          <Text style={{ fontSize: 10, fontWeight: "600", color: focused ? "#fff" : color, marginBottom: 2 }}>
+          <Text style={{ fontSize: 10, fontWeight: "600", color: focused ? "#fff" : color,transform: [{ translateY: -5 }] }}>
             {children}
           </Text>
         ),
@@ -84,7 +113,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="overtime"
         options={{
-          title: "加班費",
+          title: "加班統計",
           tabBarIcon: ({ color, focused }) => <TabIcon name="overtime" color={color} focused={focused} />,
         }}
       />

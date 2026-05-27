@@ -21,6 +21,12 @@ export const colors = {
   muted: "#64748b",
   card: "#ffffff",
   destructive: "#ef4444",
+  /** 請假系統色（淡紅） */
+  leave: "#f87171",
+  leaveSoft: "#fecaca",
+  leaveText: "#b91c1c",
+  /** 薪資／加班費合計等金額強調色 */
+  businessBlue: "#1e4a8c",
 };
 
 export function cardShadow(elevation = 4): ViewStyle {

@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { clampOvertimeNote } from "@/src/constants/overtimeNotes";
 import { formatYMD } from "@/src/logic/dates";
 import { type GeneratedShiftRow } from "@/src/logic/shiftLogic";
 import { applyTemplateAppearanceToShifts } from "@/src/logic/templateShiftSync";
@@ -10,7 +11,15 @@ import {
   migrateShiftColor,
   SHIFT_SEED_COLOR,
 } from "@/src/constants/shiftPresetColors";
-import type { AppSettings, Overtime, ShiftItem, ShiftTemplate, SystemShiftTag } from "@/src/types";
+import type {
+  AppSettings,
+  Overtime,
+  RotationSlotCode,
+  SavedCustomRotation,
+  ShiftItem,
+  ShiftTemplate,
+  SystemShiftTag,
+} from "@/src/types";
 
 const STORAGE_KEY = "cpc_native_app_v1";
 
@@ -18,6 +27,8 @@ const defaultSettings = (): AppSettings => ({
   baseSalary: "40000",
   startDay: "8",
   handoverEnabled: true,
+  differentialHoursEnabled: false,
+  nationalHolidayOvertimeEnabled: false,
   midAllowance: "200",
   nightAllowance: "450",
   nextShiftId: 1,
@@ -30,7 +41,7 @@ function seedTemplates(now: string): ShiftTemplate[] {
   return [
     {
       id: 1,
-      name: "預設早班",
+      name: "早班",
       color: SHIFT_SEED_COLOR.早班,
       startTime: "07:00",
       endTime: "15:00",
@@ -41,7 +52,7 @@ function seedTemplates(now: string): ShiftTemplate[] {
     },
     {
       id: 2,
-      name: "預設中班",
+      name: "中班",
       color: SHIFT_SEED_COLOR.中班,
       startTime: "15:00",
       endTime: "23:00",
@@ -52,7 +63,7 @@ function seedTemplates(now: string): ShiftTemplate[] {
     },
     {
       id: 3,
-      name: "預設夜班",
+      name: "夜班",
       color: SHIFT_SEED_COLOR.夜班,
       startTime: "23:00",
       endTime: "07:00",
@@ -63,7 +74,7 @@ function seedTemplates(now: string): ShiftTemplate[] {
     },
     {
       id: 4,
-      name: "預設休假",
+      name: "休假",
       color: SHIFT_SEED_COLOR.休假,
       startTime: null,
       endTime: null,
@@ -155,7 +166,25 @@ function mergeLegacyCoreTemplates(parsed: ShiftTemplate[], now: string): ShiftTe
       endTime: t.endTime ?? "17:00",
     });
   }
-  return Array.from(byId.values()).sort((a, b) => a.id - b.id);
+  return Array.from(byId.values())
+    .map(normalizeFixedSystemTemplateName)
+    .sort((a, b) => a.id - b.id);
+}
+
+const LEGACY_FIXED_TEMPLATE_NAMES: Record<SystemShiftTag, string> = {
+  早班: "預設早班",
+  中班: "預設中班",
+  夜班: "預設夜班",
+  休假: "預設休假",
+};
+
+function normalizeFixedSystemTemplateName(t: ShiftTemplate): ShiftTemplate {
+  if (!t.isFixed || !t.systemTag) return t;
+  const legacyName = LEGACY_FIXED_TEMPLATE_NAMES[t.systemTag];
+  if (legacyName && t.name === legacyName) {
+    return { ...t, name: t.systemTag };
+  }
+  return t;
 }
 
 function normalizeModernTemplates(rows: ShiftTemplate[]): ShiftTemplate[] {
@@ -168,8 +197,8 @@ function normalizeModernTemplates(rows: ShiftTemplate[]): ShiftTemplate[] {
         endTime: t.endTime ?? "17:00",
       };
     }
-    if (t.systemTag === "休假") return { ...t, startTime: null, endTime: null };
-    return { ...t, startTime: t.startTime ?? "09:00", endTime: t.endTime ?? "17:00" };
+    if (t.systemTag === "休假") return normalizeFixedSystemTemplateName({ ...t, startTime: null, endTime: null });
+    return normalizeFixedSystemTemplateName({ ...t, startTime: t.startTime ?? "09:00", endTime: t.endTime ?? "17:00" });
   });
 }
 
@@ -199,10 +228,24 @@ type PersistShape = {
   templates: ShiftTemplate[];
   overtime: Overtime[];
   settings: AppSettings;
+  customRotation?: SavedCustomRotation | null;
 };
 
+function parseSavedCustomRotation(raw: unknown): SavedCustomRotation | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (!Array.isArray(o.dna)) return null;
+  const dna = o.dna.filter(
+    (x): x is RotationSlotCode => x === "M" || x === "A" || x === "N" || x === "O",
+  );
+  const updatedAt = typeof o.updatedAt === "string" ? o.updatedAt : new Date().toISOString();
+  return { dna, updatedAt };
+}
+
 type AppDataContextValue = PersistShape & {
+  customRotation: SavedCustomRotation | null;
   ready: boolean;
+  saveCustomRotation: (dna: RotationSlotCode[]) => void;
   upsertShiftForDate: (row: Omit<ShiftItem, "id" | "createdAt"> & { id?: number }) => void;
   bulkUpsertShifts: (rows: GeneratedShiftRow[]) => number;
   deleteShift: (id: number) => void;
@@ -216,8 +259,10 @@ type AppDataContextValue = PersistShape & {
     lateHours: number;
     earlyClassHours: number;
     lateClassHours: number;
-    leaveStart?: string;
-    leaveEnd?: string;
+    leaveStart?: string | null;
+    leaveEnd?: string | null;
+    holidayWorkStart?: string | null;
+    holidayWorkEnd?: string | null;
     notes?: string;
   }) => void;
   deleteOvertimeByDate: (date: string) => void;
@@ -234,6 +279,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [templates, setTemplates] = useState<ShiftTemplate[]>([]);
   const [overtime, setOvertime] = useState<Overtime[]>([]);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const [customRotation, setCustomRotation] = useState<SavedCustomRotation | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -260,15 +306,18 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
             setTemplates(loadedTemplates);
             setOvertime(Array.isArray(p.overtime) ? p.overtime : []);
             setSettings(mergedSettings);
+            setCustomRotation(parseSavedCustomRotation(p.customRotation));
           }
         } else if (!cancelled) {
           setTemplates(seedTemplates(new Date().toISOString()));
           setSettings(defaultSettings());
+          setCustomRotation(null);
         }
       } catch {
         if (!cancelled) {
           setTemplates(seedTemplates(new Date().toISOString()));
           setSettings(defaultSettings());
+          setCustomRotation(null);
         }
       } finally {
         if (!cancelled) setReady(true);
@@ -281,9 +330,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!ready) return;
-    const payload: PersistShape = { shifts, templates, overtime, settings };
+    const payload: PersistShape = { shifts, templates, overtime, settings, customRotation };
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload)).catch(() => {});
-  }, [shifts, templates, overtime, settings, ready]);
+  }, [shifts, templates, overtime, settings, customRotation, ready]);
 
   const upsertShiftForDate = useCallback((row: Omit<ShiftItem, "id" | "createdAt"> & { id?: number }) => {
     const createdAt = new Date().toISOString();
@@ -373,8 +422,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       lateHours: number;
       earlyClassHours: number;
       lateClassHours: number;
-      leaveStart?: string;
-      leaveEnd?: string;
+      leaveStart?: string | null;
+      leaveEnd?: string | null;
+      holidayWorkStart?: string | null;
+      holidayWorkEnd?: string | null;
       notes?: string;
     }) => {
       setOvertime((prev) => {
@@ -391,7 +442,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           // 加班／上課儲存未帶請假欄位時，不得覆寫既有 leave（否則結算交接班永遠當成無請假）
           leaveStart: "leaveStart" in data ? (data.leaveStart ?? null) : (existing?.leaveStart ?? null),
           leaveEnd: "leaveEnd" in data ? (data.leaveEnd ?? null) : (existing?.leaveEnd ?? null),
-          notes: data.notes ?? null,
+          holidayWorkStart:
+            "holidayWorkStart" in data ? (data.holidayWorkStart ?? null) : (existing?.holidayWorkStart ?? null),
+          holidayWorkEnd:
+            "holidayWorkEnd" in data ? (data.holidayWorkEnd ?? null) : (existing?.holidayWorkEnd ?? null),
+          notes: data.notes != null ? clampOvertimeNote(data.notes) || null : null,
           createdAt: existing?.createdAt ?? new Date().toISOString(),
         };
         return [...rest, row].sort((a, b) => a.date.localeCompare(b.date));
@@ -406,6 +461,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   const updateSettings = useCallback((patch: Partial<AppSettings>) => {
     setSettings((s) => ({ ...s, ...patch }));
+  }, []);
+
+  const saveCustomRotation = useCallback((dna: RotationSlotCode[]) => {
+    setCustomRotation({ dna: [...dna], updatedAt: new Date().toISOString() });
   }, []);
 
   const getShiftsInRange = useCallback(
@@ -430,7 +489,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       templates,
       overtime,
       settings,
+      customRotation,
       ready,
+      saveCustomRotation,
       upsertShiftForDate,
       bulkUpsertShifts,
       deleteShift,
@@ -449,7 +510,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       templates,
       overtime,
       settings,
+      customRotation,
       ready,
+      saveCustomRotation,
       upsertShiftForDate,
       bulkUpsertShifts,
       deleteShift,

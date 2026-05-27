@@ -21,7 +21,7 @@ export default function SmartScheduleModal({ visible, onClose, anchorYmd }: Prop
         <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
         <View style={[styles.sheet, cardShadow(16)]}>
           <View style={styles.header}>
-            <Text style={styles.hTitle}>一鍵排班（5+1）</Text>
+            <Text style={styles.hTitle}>快速排班</Text>
             <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeHit}>
               <X size={22} color={colors.text} />
             </TouchableOpacity>

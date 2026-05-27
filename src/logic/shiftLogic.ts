@@ -262,11 +262,12 @@ export function handoverHoursFromLeaveCase(lc: 9 | 10 | 11 | 12): number {
 
 /* ── OvertimePay 加班費累進拆段（原 OvertimePay.tsx brackets）──────── */
 
+/** 0–2h → 1.33×；2–8h → 1.66×；8h+ → 2.66× */
 export function brackets(h: number) {
   return {
     b133: Math.min(h, 2),
-    b166: Math.max(Math.min(h, 4) - 2, 0),
-    b200: Math.max(h - 4, 0),
+    b166: Math.max(Math.min(h, 8) - 2, 0),
+    b266: Math.max(h - 8, 0),
   };
 }
 

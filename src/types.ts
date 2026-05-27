@@ -49,14 +49,29 @@ export type Overtime = {
   lateClassHours: number;
   leaveStart?: string | null;
   leaveEnd?: string | null;
+  /** 休假日上班時段（僅班別為休假時使用） */
+  holidayWorkStart?: string | null;
+  holidayWorkEnd?: string | null;
   notes?: string | null;
   createdAt: string;
+};
+
+/** 快速排班自訂輪班 DNA（M/A/N/O）。 */
+export type RotationSlotCode = "M" | "A" | "N" | "O";
+
+export type SavedCustomRotation = {
+  dna: RotationSlotCode[];
+  updatedAt: string;
 };
 
 export type AppSettings = {
   baseSalary: string;
   startDay: string;
   handoverEnabled: boolean;
+  /** 週休少於 2 日時，於該週週六給予 8h 差額工時（依一般加班費計算）。 */
+  differentialHoursEnabled: boolean;
+  /** 啟用國定假日額外加班費（2×／獎工）計算。 */
+  nationalHolidayOvertimeEnabled: boolean;
   midAllowance: string;
   nightAllowance: string;
   nextShiftId: number;

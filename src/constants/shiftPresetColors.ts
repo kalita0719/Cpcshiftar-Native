@@ -8,14 +8,14 @@ import type { ShiftItem, ShiftTemplate, SystemShiftTag } from "@/src/types";
 export const COLOR_PALETTE_VERSION = 3;
 
 export const SHIFT_PRESET_COLORS = [
-  "#CFE8E6",
-  "#F4D8A8",
-  "#D9CEF0",
-  "#ECEFF1",
-  "#D4AFCD",
-  "#CAD5CA",
-  "#E5CDC8",
-  "#E0AFA0",
+  "#7BBFB5",
+  "#E8B86D",
+  "#9B8EC4",
+  "#E8A0A0",
+  "#8BB8D4",
+  "#A8BC8C",
+  "#E8A882",
+  "#B8A0C8",
 ] as const;
 
 export const SHIFT_SEED_COLOR: Record<SystemShiftTag, string> = {
