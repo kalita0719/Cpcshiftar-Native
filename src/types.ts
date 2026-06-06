@@ -56,8 +56,11 @@ export type Overtime = {
   createdAt: string;
 };
 
-/** 快速排班自訂輪班 DNA（M/A/N/O）。 */
-export type RotationSlotCode = "M" | "A" | "N" | "O";
+/** 四班三輪系統槽位（對應早/中/夜/休）。 */
+export type SystemSlotCode = "M" | "A" | "N" | "O";
+
+/** 自訂輪班 DNA：`M`/`A`/`N`/`O` 或 `@模板id`（班次設定新增班次）。 */
+export type RotationSlotCode = SystemSlotCode | `@${number}`;
 
 export type SavedCustomRotation = {
   dna: RotationSlotCode[];

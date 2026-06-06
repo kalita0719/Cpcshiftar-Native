@@ -23,7 +23,7 @@ type HelpKey = "handover" | "differential" | "nationalHoliday";
 const TOGGLE_HELP: Record<HelpKey, { title: string; body: string }> = {
   handover: {
     title: "啟用交接班",
-    body: "每班提早 15 分鐘上班、延後 15 分鐘下班 (+0.5h)，與當日加班合併累進計算",
+    body: "每班提早 15 分鐘上班、延後 15 分鐘下班 (+0.5h)，不與當日加班合併累進計算",
   },
   differential: {
     title: "啟用差額工時",

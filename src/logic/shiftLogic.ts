@@ -4,8 +4,10 @@
  * `pattern[i % pattern.length]` 決定當日模板；`null` 表示休假列（固定色與 00:00–00:00）。
  */
 import { addDays, formatYMD, parseYMD, pad2 } from "@/src/logic/dates";
-import type { SystemShiftTag } from "@/src/types";
+import type { RotationSlotCode, SystemShiftTag, SystemSlotCode } from "@/src/types";
 import { effectiveTemplateTimes } from "@/src/types";
+
+export type { SystemSlotCode } from "@/src/types";
 
 export type CyclePatternEntry = number | null;
 
@@ -28,9 +30,6 @@ export type GeneratedShiftRow = {
   systemTag?: SystemShiftTag;
 };
 
-/** 第二標籤：M=早/白、A=中、N=夜、O=休（對應 `SystemShiftTag`）。 */
-export type SystemSlotCode = "M" | "A" | "N" | "O";
-
 const CODE_TO_SYSTEM: Record<SystemSlotCode, SystemShiftTag> = {
   M: "早班",
   A: "中班",
@@ -46,15 +45,93 @@ export function shiftTemplatesBySystemTag(templates: Iterable<ShiftTemplateLike>
   return m;
 }
 
+export function shiftTemplatesById(templates: Iterable<ShiftTemplateLike>): Map<number, ShiftTemplateLike> {
+  const m = new Map<number, ShiftTemplateLike>();
+  for (const t of templates) {
+    m.set(t.id, t);
+  }
+  return m;
+}
+
+export function isSystemSlotCode(slot: RotationSlotCode): slot is SystemSlotCode {
+  return slot === "M" || slot === "A" || slot === "N" || slot === "O";
+}
+
+export function encodeTemplateSlot(templateId: number): RotationSlotCode {
+  return `@${templateId}`;
+}
+
+export function parseTemplateSlotId(slot: RotationSlotCode): number | null {
+  if (isSystemSlotCode(slot)) return null;
+  const m = /^@(\d+)$/.exec(slot);
+  if (!m) return null;
+  const id = Number(m[1]);
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+export function rotationDnaIsSchedulable(
+  dna: readonly RotationSlotCode[],
+  templateByTag: Map<SystemShiftTag, ShiftTemplateLike>,
+  templateById: Map<number, ShiftTemplateLike>,
+): boolean {
+  if (dna.length === 0) return false;
+  return dna.every((slot) => {
+    if (isSystemSlotCode(slot)) {
+      return templateByTag.has(CODE_TO_SYSTEM[slot]);
+    }
+    const id = parseTemplateSlotId(slot);
+    return id != null && templateById.has(id);
+  });
+}
+
+function slotToGeneratedRow(
+  slot: RotationSlotCode,
+  dateStr: string,
+  templateByTag: Map<SystemShiftTag, ShiftTemplateLike>,
+  templateById: Map<number, ShiftTemplateLike>,
+  notes?: string | null,
+): GeneratedShiftRow | null {
+  if (isSystemSlotCode(slot)) {
+    const st = CODE_TO_SYSTEM[slot];
+    const t = templateByTag.get(st);
+    if (!t) return null;
+    const { startTime, endTime } = effectiveTemplateTimes(t);
+    return {
+      date: dateStr,
+      name: t.name,
+      color: t.color,
+      startTime,
+      endTime,
+      notes: notes ?? null,
+      systemTag: st,
+    };
+  }
+  const id = parseTemplateSlotId(slot);
+  if (id == null) return null;
+  const t = templateById.get(id);
+  if (!t) return null;
+  const { startTime, endTime } = effectiveTemplateTimes(t);
+  return {
+    date: dateStr,
+    name: t.name,
+    color: t.color,
+    startTime,
+    endTime,
+    notes: notes ?? null,
+    systemTag: t.systemTag,
+  };
+}
+
 /**
  * 依輪班 DNA 與「今日在週期中的索引」推算連續多天的班次列。
  * `todayAlignIndex`：錨定日 `anchorYmd` 對應 DNA 陣列中的 0-based 位置。
  */
 export function buildYearShiftRowsFromDna(
-  dna: readonly SystemSlotCode[],
+  dna: readonly RotationSlotCode[],
   todayAlignIndex: number,
   anchorYmd: string,
   templateByTag: Map<SystemShiftTag, ShiftTemplateLike>,
+  templateById: Map<number, ShiftTemplateLike>,
   totalDays = 365,
   notes?: string | null,
 ): GeneratedShiftRow[] {
@@ -66,20 +143,14 @@ export function buildYearShiftRowsFromDna(
     const d = addDays(start, dayDelta);
     const dateStr = formatYMD(d);
     const idx = (((todayAlignIndex + dayDelta) % L) + L) % L;
-    const code = dna[idx];
-    const st = CODE_TO_SYSTEM[code];
-    const t = templateByTag.get(st);
-    if (!t) continue;
-    const { startTime, endTime } = effectiveTemplateTimes(t);
-    rows.push({
-      date: dateStr,
-      name: t.name,
-      color: t.color,
-      startTime,
-      endTime,
-      notes: notes ?? null,
-      systemTag: st,
-    });
+    const row = slotToGeneratedRow(
+      dna[idx],
+      dateStr,
+      templateByTag,
+      templateById,
+      notes,
+    );
+    if (row) rows.push(row);
   }
   return rows;
 }
@@ -89,10 +160,11 @@ export function buildYearShiftRowsFromDna(
  * DNA 索引與 `buildYearShiftRowsFromDna` 在錨定日銜接（anchor 當日為 `todayAlignIndex`）。
  */
 export function buildPastShiftRowsFromDna(
-  dna: readonly SystemSlotCode[],
+  dna: readonly RotationSlotCode[],
   todayAlignIndex: number,
   anchorYmd: string,
   templateByTag: Map<SystemShiftTag, ShiftTemplateLike>,
+  templateById: Map<number, ShiftTemplateLike>,
   totalDays = 365,
   notes?: string | null,
 ): GeneratedShiftRow[] {
@@ -104,20 +176,14 @@ export function buildPastShiftRowsFromDna(
     const d = addDays(start, -k);
     const dateStr = formatYMD(d);
     const idx = (((todayAlignIndex - k) % L) + L) % L;
-    const code = dna[idx];
-    const st = CODE_TO_SYSTEM[code];
-    const t = templateByTag.get(st);
-    if (!t) continue;
-    const { startTime, endTime } = effectiveTemplateTimes(t);
-    rows.push({
-      date: dateStr,
-      name: t.name,
-      color: t.color,
-      startTime,
-      endTime,
-      notes: notes ?? null,
-      systemTag: st,
-    });
+    const row = slotToGeneratedRow(
+      dna[idx],
+      dateStr,
+      templateByTag,
+      templateById,
+      notes,
+    );
+    if (row) rows.push(row);
   }
   return rows;
 }

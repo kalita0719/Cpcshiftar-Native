@@ -489,37 +489,41 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
   const save = () => {
     if (!canSave) return;
 
-    const payload = {
-      date,
-      earlyHours: existing?.earlyHours ?? 0,
-      lateHours: existing?.lateHours ?? 0,
-      earlyClassHours: existing?.earlyClassHours ?? 0,
-      lateClassHours: existing?.lateClassHours ?? 0,
-      leaveStart: existing?.leaveStart ?? null,
-      leaveEnd: existing?.leaveEnd ?? null,
-      notes: trimmedNotes || undefined,
-    };
-
     if (savingLeave) {
-      payload.leaveStart = leaveStartTimeStr;
-      payload.leaveEnd = leaveEndTimeStr;
+      upsertOvertime({
+        date,
+        earlyHours: 0,
+        lateHours: 0,
+        earlyClassHours: 0,
+        lateClassHours: 0,
+        leaveStart: leaveStartTimeStr,
+        leaveEnd: leaveEndTimeStr,
+        notes: trimmedNotes || undefined,
+      });
+    } else if (savingOtHours) {
+      upsertOvertime({
+        date,
+        earlyHours: tab === "加班" && isEarly ? hours : 0,
+        lateHours: tab === "加班" && isLate ? hours : 0,
+        earlyClassHours: tab === "上課" && isEarly ? hours : 0,
+        lateClassHours: tab === "上課" && isLate ? hours : 0,
+        leaveStart: null,
+        leaveEnd: null,
+        notes: trimmedNotes || undefined,
+      });
+    } else {
+      upsertOvertime({
+        date,
+        earlyHours: existing?.earlyHours ?? 0,
+        lateHours: existing?.lateHours ?? 0,
+        earlyClassHours: existing?.earlyClassHours ?? 0,
+        lateClassHours: existing?.lateClassHours ?? 0,
+        leaveStart: existing?.leaveStart ?? null,
+        leaveEnd: existing?.leaveEnd ?? null,
+        notes: trimmedNotes || undefined,
+      });
     }
 
-    if (savingOtHours) {
-      if (tab === "加班") {
-        payload.earlyHours = isEarly ? hours : 0;
-        payload.lateHours = isLate ? hours : 0;
-        payload.earlyClassHours = 0;
-        payload.lateClassHours = 0;
-      } else {
-        payload.earlyClassHours = isEarly ? hours : 0;
-        payload.lateClassHours = isLate ? hours : 0;
-        payload.earlyHours = 0;
-        payload.lateHours = 0;
-      }
-    }
-
-    upsertOvertime(payload);
     onClose();
   };
 

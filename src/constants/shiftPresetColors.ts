@@ -12,10 +12,10 @@ export const SHIFT_PRESET_COLORS = [
   "#E8B86D",
   "#9B8EC4",
   "#E8A0A0",
-  "#8BB8D4",
-  "#A8BC8C",
-  "#E8A882",
-  "#B8A0C8",
+  "#00bfff",
+  "#ffa500",
+  "#da70d6",
+  "#dcdcdc",
 ] as const;
 
 export const SHIFT_SEED_COLOR: Record<SystemShiftTag, string> = {

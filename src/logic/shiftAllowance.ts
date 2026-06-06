@@ -294,17 +294,18 @@ export function getDisplayShiftTimes(
     return { startTime: shift.startTime, endTime: shift.endTime, changed: false };
   }
 
-  const otInput: ShiftAllowanceOvertime | null = ot
-    ? {
-        earlyHours: ot.earlyHours,
-        lateHours: ot.lateHours,
-        earlyClassHours: ot.earlyClassHours,
-        lateClassHours: ot.lateClassHours,
-      }
-    : null;
-  const earlyH = (ot?.earlyHours ?? 0) + (ot?.earlyClassHours ?? 0);
-  const lateH = (ot?.lateHours ?? 0) + (ot?.lateClassHours ?? 0);
   const hasLeave = !!(ot?.leaveStart && ot?.leaveEnd);
+  const otInput: ShiftAllowanceOvertime | null =
+    ot && !hasLeave
+      ? {
+          earlyHours: ot.earlyHours,
+          lateHours: ot.lateHours,
+          earlyClassHours: ot.earlyClassHours,
+          lateClassHours: ot.lateClassHours,
+        }
+      : null;
+  const earlyH = hasLeave ? 0 : (ot?.earlyHours ?? 0) + (ot?.earlyClassHours ?? 0);
+  const lateH = hasLeave ? 0 : (ot?.lateHours ?? 0) + (ot?.lateClassHours ?? 0);
 
   let { startTime, endTime } = resolveEffectiveShiftTimes(
     shift,
@@ -338,9 +339,12 @@ export function getScheduleChangeLabels(
     return labels.join("");
   }
 
-  if ((ot.earlyHours ?? 0) > 0 || (ot.lateHours ?? 0) > 0) labels.push("（加班）");
-  if ((ot.earlyClassHours ?? 0) > 0 || (ot.lateClassHours ?? 0) > 0) labels.push("（上課）");
-  if (ot.leaveStart && ot.leaveEnd) labels.push("（請假）");
+  if (ot.leaveStart && ot.leaveEnd) {
+    labels.push("（請假）");
+  } else {
+    if ((ot.earlyHours ?? 0) > 0 || (ot.lateHours ?? 0) > 0) labels.push("（加班）");
+    if ((ot.earlyClassHours ?? 0) > 0 || (ot.lateClassHours ?? 0) > 0) labels.push("（上課）");
+  }
 
   return labels.join("");
 }

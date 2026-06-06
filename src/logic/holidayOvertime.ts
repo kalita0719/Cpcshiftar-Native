@@ -68,16 +68,22 @@ export function holidayWorkHours(ot: Pick<Overtime, "holidayWorkStart" | "holida
   return Math.round((endMs - startMs) / MS_MIN) / 60;
 }
 
+/** 上班日有請假紀錄（與加班／上課互斥）。 */
+export function hasWorkdayLeave(ot?: Pick<Overtime, "leaveStart" | "leaveEnd"> | null): boolean {
+  return !!(ot?.leaveStart && ot?.leaveEnd);
+}
+
 /** 列入加班統計／加班費的時數 */
 export function recordedOvertimeHours(ot: Overtime, shift?: ShiftItem | null): number {
   if (shift && isRestDayShift(shift) && hasHolidayWork(ot)) {
     return holidayWorkHours(ot);
   }
+  if (hasWorkdayLeave(ot)) return 0;
   return (ot.earlyHours ?? 0) + (ot.lateHours ?? 0);
 }
 
 function otAllowanceInput(ot?: Overtime | null): ShiftAllowanceOvertime | null {
-  if (!ot) return null;
+  if (!ot || hasWorkdayLeave(ot)) return null;
   return {
     earlyHours: ot.earlyHours,
     lateHours: ot.lateHours,

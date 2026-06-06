@@ -17,7 +17,6 @@ export default function AdBannerSlot({ style }: Props) {
 const styles = StyleSheet.create({
   slot: {
     height: AD_BANNER_HEIGHT,
-    backgroundColor: "#E8F4FC",
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },

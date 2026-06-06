@@ -3,7 +3,10 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { clampOvertimeNote } from "@/src/constants/overtimeNotes";
 import { formatYMD } from "@/src/logic/dates";
 import { type GeneratedShiftRow } from "@/src/logic/shiftLogic";
-import { applyTemplateAppearanceToShifts } from "@/src/logic/templateShiftSync";
+import {
+  applyTemplateAppearanceToShifts,
+  applyTemplateTimesToShifts,
+} from "@/src/logic/templateShiftSync";
 import {
   applyPaletteToShifts,
   applyPaletteToTemplates,
@@ -235,9 +238,10 @@ function parseSavedCustomRotation(raw: unknown): SavedCustomRotation | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   if (!Array.isArray(o.dna)) return null;
-  const dna = o.dna.filter(
-    (x): x is RotationSlotCode => x === "M" || x === "A" || x === "N" || x === "O",
-  );
+  const dna = o.dna.filter((x): x is RotationSlotCode => {
+    if (x === "M" || x === "A" || x === "N" || x === "O") return true;
+    return typeof x === "string" && /^@\d+$/.test(x) && Number(x.slice(1)) > 0;
+  });
   const updatedAt = typeof o.updatedAt === "string" ? o.updatedAt : new Date().toISOString();
   return { dna, updatedAt };
 }
@@ -404,15 +408,31 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         return { ...t, ...safe };
       });
       const after = next.find((t) => t.id === id);
-      if (before && after && patch.color !== undefined && patch.color !== before.color) {
-        setShifts((shifts) => applyTemplateAppearanceToShifts(shifts, after, before.color));
+      if (before && after) {
+        const nameChanged = patch.name !== undefined && patch.name !== before.name;
+        const colorChanged = patch.color !== undefined && patch.color !== before.color;
+        const timesChanged =
+          (patch.startTime !== undefined && patch.startTime !== before.startTime) ||
+          (patch.endTime !== undefined && patch.endTime !== before.endTime);
+        if (nameChanged || colorChanged || timesChanged) {
+          setShifts((shifts) => {
+            let updated = shifts;
+            if (nameChanged || colorChanged) {
+              updated = applyTemplateAppearanceToShifts(updated, after, before);
+            }
+            if (timesChanged) {
+              updated = applyTemplateTimesToShifts(updated, after, before);
+            }
+            return updated;
+          });
+        }
       }
       return next;
     });
   }, []);
 
   const deleteTemplate = useCallback((id: number) => {
-    setTemplates((prev) => prev.filter((t) => !(t.id === id && t.isFixed)));
+    setTemplates((prev) => prev.filter((t) => t.id !== id || t.isFixed));
   }, []);
 
   const upsertOvertime = useCallback(

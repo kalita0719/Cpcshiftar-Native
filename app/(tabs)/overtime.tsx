@@ -5,6 +5,7 @@ import { computeDifferentialOvertime } from "@/src/logic/differentialHours";
 import {
   buildHolidayAllowanceShift,
   hasHolidayWork,
+  hasWorkdayLeave,
   holidayHandoverHours,
   isAllowanceEligibleWithHoliday,
   recordedOvertimeHours,
@@ -88,14 +89,15 @@ export default function OvertimeScreen() {
           ...s,
           leaveStart: ot?.leaveStart ?? null,
           leaveEnd: ot?.leaveEnd ?? null,
-          overtime: ot
-            ? {
-                earlyHours: ot.earlyHours,
-                lateHours: ot.lateHours,
-                earlyClassHours: ot.earlyClassHours,
-                lateClassHours: ot.lateClassHours,
-              }
-            : null,
+          overtime:
+            ot && !hasWorkdayLeave(ot)
+              ? {
+                  earlyHours: ot.earlyHours,
+                  lateHours: ot.lateHours,
+                  earlyClassHours: ot.earlyClassHours,
+                  lateClassHours: ot.lateClassHours,
+                }
+              : null,
           handoverEnabled: handover,
         },
       ];
@@ -381,7 +383,7 @@ export default function OvertimeScreen() {
             </View>
             {baseSalary > 0 && (
               <Text style={[styles.footNote, { marginTop: 8 }]}>
-                底薪 {baseSalary.toLocaleString()}
+                底薪 {baseSalary.toLocaleString()} · 時薪 ${hourlyRate}
               </Text>
             )}
           </Card>

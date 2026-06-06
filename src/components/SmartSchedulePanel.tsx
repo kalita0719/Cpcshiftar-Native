@@ -1,13 +1,18 @@
 import { cardShadow, colors } from "@/src/components/theme";
 import { formatYMD } from "@/src/logic/dates";
+import { shiftTwoCharLabel } from "@/src/logic/shiftDisplay";
 import {
   buildPastShiftRowsFromDna,
   buildYearShiftRowsFromDna,
+  encodeTemplateSlot,
+  isSystemSlotCode,
+  rotationDnaIsSchedulable,
+  shiftTemplatesById,
   shiftTemplatesBySystemTag,
   type SystemSlotCode,
 } from "@/src/logic/shiftLogic";
 import { useAppData } from "@/src/state/AppDataContext";
-import type { ShiftTemplate, SystemShiftTag } from "@/src/types";
+import type { RotationSlotCode, ShiftTemplate, SystemShiftTag } from "@/src/types";
 import { Check } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -49,11 +54,11 @@ const PRESET_RULES: {
   title: string;
   dna: readonly SystemSlotCode[];
 }[] = [
-  { id: "c1a", title: "四班三輪 A", dna: ["M", "M", "A", "A", "O", "N", "N", "O"] },
-  { id: "c1b", title: "四班三輪 B", dna: ["A", "A", "M", "M", "N", "N", "O", "O"] },
-  { id: "c1c", title: "四班三輪 C", dna: ["N", "N", "A", "A", "M", "M", "O", "O"] },
-  { id: "c2a", title: "常規 A", dna: ["M", "M", "O", "O", "N", "N", "O", "O"] },
-  { id: "c2b", title: "常規 B", dna: ["M", "M", "N", "N", "O", "O"] },
+  { id: "c1a", title: "四班三輪1", dna: ["M", "M", "A", "A", "O", "N", "N", "O"] },
+  { id: "c1b", title: "四班三輪2", dna: ["A", "A", "M", "M", "N", "N", "O", "O"] },
+  { id: "c1c", title: "四班三輪3", dna: ["N", "N", "A", "A", "M", "M", "O", "O"] },
+  { id: "c2a", title: "常規1", dna: ["M", "M", "O", "O", "N", "N", "O", "O"] },
+  { id: "c2b", title: "常規2", dna: ["M", "M", "N", "N", "O", "O"] },
 ];
 
 const CUSTOM_ID = "custom";
@@ -63,7 +68,7 @@ type WizardStep = 1 | 2 | 3;
 type SelectedRule = {
   id: string;
   title: string;
-  dna: readonly SystemSlotCode[];
+  dna: readonly RotationSlotCode[];
 };
 
 export type SmartSchedulePanelProps = {
@@ -75,20 +80,38 @@ export type SmartSchedulePanelProps = {
   hostScrollRef?: React.RefObject<ScrollViewType | null>;
 };
 
-function useCellResolver(templates: ShiftTemplate[]) {
+/** 自訂輪班預覽色塊：名稱拆成上下兩行（寬度固定、各最多 2 字）。 */
+function slotChipLines(name: string): [string, string] {
+  const trimmed = name.trim();
+  if (!trimmed) return ["?", ""];
+  if (trimmed.length <= 2) return [trimmed, ""];
+  const half = Math.ceil(trimmed.length / 2);
+  return [trimmed.slice(0, half), trimmed.slice(half)];
+}
+
+function useSlotResolver(templates: ShiftTemplate[]) {
+  const byId = useMemo(() => shiftTemplatesById(templates), [templates]);
   return useCallback(
-    (code: SystemSlotCode) => {
-      const tag = CODE_TO_TAG[code];
-      const t = templates.find((x) => x.systemTag === tag);
+    (slot: RotationSlotCode) => {
+      if (isSystemSlotCode(slot)) {
+        const tag = CODE_TO_TAG[slot];
+        const t = templates.find((x) => x.systemTag === tag);
+        return {
+          name: t?.name ?? (tag === "休假" ? "休假" : tag),
+          short: SLOT_SHORT[slot],
+          color: t?.color ?? "#94a3b8",
+        };
+      }
+      const id = Number(slot.slice(1));
+      const t = byId.get(id);
+      const name = t?.name ?? "已刪除";
       return {
-        code,
-        tag,
-        name: t?.name ?? (tag === "休假" ? "休假" : tag),
-        short: SLOT_SHORT[code],
+        name,
+        short: shiftTwoCharLabel(name),
         color: t?.color ?? "#94a3b8",
       };
     },
-    [templates],
+    [templates, byId],
   );
 }
 
@@ -172,17 +195,22 @@ export default function SmartSchedulePanel({
 }: SmartSchedulePanelProps) {
   const { templates, bulkUpsertShifts, customRotation, saveCustomRotation } = useAppData();
   const anchor = anchorYmd || formatYMD(new Date());
-  const resolveCell = useCellResolver(templates);
+  const resolveSlot = useSlotResolver(templates);
   const scrollRef = useRef<ScrollViewType>(null);
 
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
   const [selectedRule, setSelectedRule] = useState<SelectedRule | null>(null);
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
-  const [customDna, setCustomDna] = useState<SystemSlotCode[]>([]);
+  const [customDna, setCustomDna] = useState<RotationSlotCode[]>([]);
   const [customDraftOpen, setCustomDraftOpen] = useState(false);
   const [showCompleteToast, setShowCompleteToast] = useState(false);
 
   const tagMap = useMemo(() => shiftTemplatesBySystemTag(templates), [templates]);
+  const templateById = useMemo(() => shiftTemplatesById(templates), [templates]);
+  const userTemplates = useMemo(
+    () => templates.filter((t) => !t.systemTag),
+    [templates],
+  );
   const coreReady = useMemo(
     () =>
       tagMap.has("早班") && tagMap.has("中班") && tagMap.has("夜班") && tagMap.has("休假"),
@@ -211,8 +239,8 @@ export default function SmartSchedulePanel({
     return () => clearTimeout(timer);
   }, [showCompleteToast, onAfterBulkSchedule, resetWizard]);
 
-  const appendCode = (code: SystemSlotCode) => {
-    setCustomDna((prev) => (prev.length >= 31 ? prev : [...prev, code]));
+  const appendSlot = (slot: RotationSlotCode) => {
+    setCustomDna((prev) => (prev.length >= 31 ? prev : [...prev, slot]));
   };
   const popCode = () => setCustomDna((prev) => prev.slice(0, -1));
   const clearCustom = () => setCustomDna([]);
@@ -227,7 +255,7 @@ export default function SmartSchedulePanel({
     setWizardStep(2);
   };
 
-  const openCustomEditor = (dna?: SystemSlotCode[]) => {
+  const openCustomEditor = (dna?: RotationSlotCode[]) => {
     setCustomDna(dna ?? customRotation?.dna ?? []);
     setCustomDraftOpen(true);
   };
@@ -290,8 +318,17 @@ export default function SmartSchedulePanel({
 
   const runBulk = useCallback(() => {
     if (!selectedRule || selectedSlotIndex === null) return;
-    if (!coreReady) {
-      Alert.alert("無法排班", "請先於右上角「班次設定」確認早、中、夜、休四種系統模板皆存在。");
+    const schedulable =
+      selectedRule.id === CUSTOM_ID
+        ? rotationDnaIsSchedulable(selectedRule.dna, tagMap, templateById)
+        : coreReady;
+    if (!schedulable) {
+      Alert.alert(
+        "無法排班",
+        selectedRule.id === CUSTOM_ID
+          ? "輪班排序中有班次尚未設定或已被刪除，請至「班次設定」檢查。"
+          : "請先於右上角「班次設定」確認早、中、夜、休四種系統模板皆存在。",
+      );
       return;
     }
     const forward = buildYearShiftRowsFromDna(
@@ -299,6 +336,7 @@ export default function SmartSchedulePanel({
       selectedSlotIndex,
       anchor,
       tagMap,
+      templateById,
       365,
       null,
     );
@@ -307,6 +345,7 @@ export default function SmartSchedulePanel({
       selectedSlotIndex,
       anchor,
       tagMap,
+      templateById,
       365,
       null,
     );
@@ -325,20 +364,34 @@ export default function SmartSchedulePanel({
     ]).then(() => {
       setShowCompleteToast(true);
     });
-  }, [anchor, bulkUpsertShifts, coreReady, selectedRule, selectedSlotIndex, tagMap]);
+  }, [
+    anchor,
+    bulkUpsertShifts,
+    coreReady,
+    selectedRule,
+    selectedSlotIndex,
+    tagMap,
+    templateById,
+  ]);
 
   const renderPatternPreview = (
-    dna: readonly SystemSlotCode[],
+    dna: readonly RotationSlotCode[],
     size: "step1" | "compact" | "normal" = "normal",
-    options?: { wrap?: boolean },
+    options?: { wrap?: boolean; twoLine?: boolean },
   ) => {
-    const chipStyle =
-      size === "step1"
+    const twoLine = Boolean(options?.twoLine);
+    const chipStyle = twoLine
+      ? styles.patternChipCustom
+      : size === "step1"
         ? styles.patternChipStep1
         : size === "compact"
           ? styles.patternChipCompact
           : styles.patternChip;
-    const chipTextStyle = size === "step1" ? styles.patternChipTextStep1 : styles.patternChipText;
+    const chipTextStyle = twoLine
+      ? styles.patternChipTextCustom
+      : size === "step1"
+        ? styles.patternChipTextStep1
+        : styles.patternChipText;
     return (
       <View
         style={[
@@ -347,14 +400,38 @@ export default function SmartSchedulePanel({
           options?.wrap && styles.patternRowWrap,
         ]}
       >
-        {dna.map((code, i) => {
-          const c = resolveCell(code);
+        {dna.map((slot, i) => {
+          const c = resolveSlot(slot);
+          const [line1, line2] = twoLine ? slotChipLines(c.name) : [c.short, ""];
           return (
             <View
-              key={`${code}-${i}`}
+              key={`${slot}-${i}`}
               style={[chipStyle, { backgroundColor: c.color, borderColor: "rgba(0,0,0,0.12)" }]}
             >
-              <Text style={[chipTextStyle, styles.chipTextOnColor]}>{c.short}</Text>
+              {twoLine ? (
+                <View style={styles.patternChipTextStack}>
+                  <Text
+                    style={[chipTextStyle, styles.chipTextOnColor]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                  >
+                    {line1}
+                  </Text>
+                  {line2 ? (
+                    <Text
+                      style={[chipTextStyle, styles.chipTextOnColor]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.75}
+                    >
+                      {line2}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : (
+                <Text style={[chipTextStyle, styles.chipTextOnColor]}>{c.short}</Text>
+              )}
             </View>
           );
         })}
@@ -370,7 +447,7 @@ export default function SmartSchedulePanel({
 
   const todaySummaryLabel =
     selectedRule && selectedSlotIndex !== null
-      ? `第 ${selectedSlotIndex + 1} 天 · ${resolveCell(selectedRule.dna[selectedSlotIndex]).name}`
+      ? `第 ${selectedSlotIndex + 1} 天 · ${resolveSlot(selectedRule.dna[selectedSlotIndex]).name}`
       : "";
 
   const scrollStyle = embedded ? styles.scrollEmbedded : styles.scroll;
@@ -442,7 +519,10 @@ export default function SmartSchedulePanel({
                                   : "未排入班次 · 點擊修改"}
                               </Text>
                               {customRotation.dna.length > 0
-                                ? renderPatternPreview(customRotation.dna, "step1", { wrap: true })
+                                ? renderPatternPreview(customRotation.dna, "step1", {
+                                    wrap: true,
+                                    twoLine: true,
+                                  })
                                 : null}
                             </>
                           ) : (
@@ -474,26 +554,52 @@ export default function SmartSchedulePanel({
                       <Text style={styles.lenText}>目前長度：{customDna.length} / 31</Text>
                       <View style={styles.customPreviewArea}>
                         {customDna.length > 0 ? (
-                          renderPatternPreview(customDna, "step1", { wrap: true })
+                          renderPatternPreview(customDna, "step1", { wrap: true, twoLine: true })
                         ) : (
                           <Text style={styles.placeholder}>尚未排入班次</Text>
                         )}
                       </View>
                       <View style={styles.customToolbarFrame}>
-                        <View style={styles.customToolbar}>
+                        <View style={styles.customToolbarCoreRow}>
                           {(["M", "A", "N", "O"] as const).map((code) => {
-                            const c = resolveCell(code);
+                            const c = resolveSlot(code);
                             return (
                               <TouchableOpacity
                                 key={code}
-                                style={[styles.addChip, { backgroundColor: c.color }]}
-                                onPress={() => appendCode(code)}
+                                style={[styles.addChipCore, { backgroundColor: c.color }]}
+                                onPress={() => appendSlot(code)}
                                 disabled={customDna.length >= 31}
                               >
-                                <Text style={styles.addChipText}>+{c.name}</Text>
+                                <Text
+                                  style={styles.addChipCoreText}
+                                  numberOfLines={1}
+                                  adjustsFontSizeToFit
+                                  minimumFontScale={0.8}
+                                >
+                                  +{shiftTwoCharLabel(c.name)}
+                                </Text>
                               </TouchableOpacity>
                             );
                           })}
+                        </View>
+                        <View style={styles.customToolbar}>
+                          {userTemplates.map((t) => (
+                            <TouchableOpacity
+                              key={`tpl-${t.id}`}
+                              style={[styles.addChip, { backgroundColor: t.color }]}
+                              onPress={() => appendSlot(encodeTemplateSlot(t.id))}
+                              disabled={customDna.length >= 31}
+                            >
+                              <Text
+                                style={styles.addChipText}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.8}
+                              >
+                                +{shiftTwoCharLabel(t.name.trim() || "班次")}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
                           <TouchableOpacity
                             style={styles.ghostBtn}
                             onPress={popCode}
@@ -554,8 +660,8 @@ export default function SmartSchedulePanel({
                     </Text>
                     {selectedRule.id === CUSTOM_ID ? (
                       <View style={styles.dayGrid}>
-                        {selectedRule.dna.map((code, i) => {
-                          const c = resolveCell(code);
+                        {selectedRule.dna.map((slot, i) => {
+                          const c = resolveSlot(slot);
                           return (
                             <View key={`day-${i}`} style={styles.dayCell}>
                               <Text style={styles.dayLabel}>第{i + 1}天</Text>
@@ -583,8 +689,8 @@ export default function SmartSchedulePanel({
                             <View key={`preset-row-${rowIdx}`} style={styles.dayGridPresetRow}>
                               {Array.from({ length: 4 }, (_, colIdx) => {
                                 const i = rowIdx * 4 + colIdx;
-                                const code = selectedRule.dna[i];
-                                if (code === undefined) {
+                                const slot = selectedRule.dna[i];
+                                if (slot === undefined) {
                                   return (
                                     <View
                                       key={`empty-${colIdx}`}
@@ -592,7 +698,7 @@ export default function SmartSchedulePanel({
                                     />
                                   );
                                 }
-                                const c = resolveCell(code);
+                                const c = resolveSlot(slot);
                                 return (
                                   <View key={`day-${i}`} style={styles.dayCellPreset}>
                                     <Text style={styles.dayLabel}>第{i + 1}天</Text>
@@ -870,11 +976,27 @@ const styles = StyleSheet.create({
   },
   patternChipStep1: {
     width: 30,
-    height: 35,
+    height: 30,
     borderRadius: 5,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  patternChipCustom: {
+    width: 30,
+    height: 42,
+    borderRadius: 5,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 2,
+  },
+  patternChipTextStack: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 1,
+    width: "100%",
+    paddingHorizontal: 1,
   },
   patternChipCompact: {
     width: 20,
@@ -886,6 +1008,13 @@ const styles = StyleSheet.create({
   },
   patternChipText: { fontSize: 9, fontWeight: "800" },
   patternChipTextStep1: { fontSize: 10, fontWeight: "800" },
+  patternChipTextCustom: {
+    fontSize: 9,
+    fontWeight: "800",
+    lineHeight: 11,
+    textAlign: "center",
+    width: "100%",
+  },
   chipTextOnColor: { color: "#fff" },
 
   customBuilder: {
@@ -898,7 +1027,7 @@ const styles = StyleSheet.create({
   },
   subHint: { fontSize: 12, color: colors.muted, marginBottom: 8, lineHeight: 18 },
   customPreviewArea: {
-    minHeight: 40,
+    minHeight: 48,
     marginBottom: 10,
     width: "100%",
   },
@@ -911,8 +1040,29 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     width: "100%",
   },
+  customToolbarCoreRow: {
+    flexDirection: "row",
+    gap: 6,
+    width: "100%",
+    marginBottom: 8,
+  },
   customToolbar: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  addChip: { borderRadius: 6, paddingVertical: 8, paddingHorizontal: 10 },
+  addChipCore: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addChipCoreText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 12,
+    textAlign: "center",
+  },
+  addChip: { borderRadius: 6, paddingVertical: 8, paddingHorizontal: 9 },
   addChipText: { color: "#fff", fontWeight: "800", fontSize: 12 },
   ghostBtn: {
     borderWidth: 1,

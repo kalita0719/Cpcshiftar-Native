@@ -14,6 +14,7 @@ import {
 } from "@/src/logic/dates";
 import { getHolidayCalendarChip } from "@/src/logic/holidayConfig";
 import { hasHolidayWork } from "@/src/logic/holidayOvertime";
+import { shiftTwoCharLabel } from "@/src/logic/shiftDisplay";
 import { leaveCase, shiftTime } from "@/src/logic/shiftLogic";
 import { useAppData } from "@/src/state/AppDataContext";
 import type { Overtime, ShiftItem } from "@/src/types";
@@ -649,7 +650,7 @@ export default function CalendarGrid({
                         numberOfLines={1}
                         ellipsizeMode="clip"
                       >
-                        {showHolidayOtLabel ? "加班" : shift.name}
+                        {showHolidayOtLabel ? "加班" : shiftTwoCharLabel(shift.name)}
                       </Text>
                     </View>
                   ) : inCurrentMonth && isScheduleMode ? (
@@ -729,7 +730,7 @@ export default function CalendarGrid({
                           numberOfLines={1}
                           ellipsizeMode="clip"
                         >
-                          {showHolidayOtLabel ? "加班" : shift.name}
+                          {showHolidayOtLabel ? "加班" : shiftTwoCharLabel(shift.name)}
                         </Text>
                       </View>
                     ) : inCurrentMonth && (isShiftMode || isScheduleMode) ? (

@@ -8,7 +8,7 @@ import { hourlyRateFromBaseSalary } from "@/src/logic/overtimePay";
 import { getDisplayShiftTimes, getScheduleChangeLabels } from "@/src/logic/shiftAllowance";
 import { getPeriod } from "@/src/logic/shiftLogic";
 import { useAppData } from "@/src/state/AppDataContext";
-import { Calendar, Clock, Settings2, TrendingUp } from "lucide-react-native";
+import { Calendar, Clock, Settings2 } from "lucide-react-native";
 import React, { useMemo, useState } from "react";
 import ScreenLayout from "@/src/components/ScreenLayout";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -29,30 +29,49 @@ export default function HomeScreen() {
     [overtime, period.from, effectiveTo],
   );
 
+  const periodOtData = useMemo(
+    () => overtime.filter((o) => o.date >= period.from && o.date <= period.to),
+    [overtime, period.from, period.to],
+  );
+
   const baseSalary = parseFloat(settings.baseSalary) || 0;
   const hourlyRate = hourlyRateFromBaseSalary(baseSalary);
+  const differentialEnabled = settings.differentialHoursEnabled;
 
   const shiftByDate = useMemo(() => new Map(shifts.map((s) => [s.date, s])), [shifts]);
 
-  const differential = useMemo(
+  const calendarToDate = useMemo(
+    () =>
+      overtimeData.reduce((s, r) => s + recordedOvertimeHours(r, shiftByDate.get(r.date)), 0),
+    [overtimeData, shiftByDate],
+  );
+
+  const calendarPeriod = useMemo(
+    () =>
+      periodOtData.reduce((s, r) => s + recordedOvertimeHours(r, shiftByDate.get(r.date)), 0),
+    [periodOtData, shiftByDate],
+  );
+
+  const differentialToDate = useMemo(
     () =>
       computeDifferentialOvertime(
         shifts,
         period.from,
         effectiveTo,
-        settings.differentialHoursEnabled,
+        differentialEnabled,
         hourlyRate,
       ),
-    [shifts, period.from, effectiveTo, settings.differentialHoursEnabled, hourlyRate],
+    [shifts, period.from, effectiveTo, differentialEnabled, hourlyRate],
   );
 
-  const totalOtHours = useMemo(() => {
-    const calendar = overtimeData.reduce(
-      (s, r) => s + recordedOvertimeHours(r, shiftByDate.get(r.date)),
-      0,
-    );
-    return calendar + differential.totalHours;
-  }, [overtimeData, shiftByDate, differential.totalHours]);
+  const differentialPeriod = useMemo(
+    () =>
+      computeDifferentialOvertime(shifts, period.from, period.to, differentialEnabled, hourlyRate),
+    [shifts, period.from, period.to, differentialEnabled, hourlyRate],
+  );
+
+  const otToDate = calendarToDate + differentialToDate.totalHours;
+  const otPeriod = calendarPeriod + differentialPeriod.totalHours;
 
   const tomorrow = formatYMD(addDays(new Date(), 1));
   const nearOtMap = useMemo(() => {
@@ -128,20 +147,25 @@ export default function HomeScreen() {
         </View>
 
         <Card style={styles.otCard}>
-          <View style={styles.otIconWrap}>
-            <TrendingUp size={28} color={colors.teal} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.otLabel}>本月累計加班時數</Text>
-            <Text style={styles.otHours}>{totalOtHours}h</Text>
-          </View>
-          <View style={styles.otCardRight}>
-            <View style={styles.periodChip}>
-              <Text style={styles.periodChipText}>{period.label}</Text>
+          <Text style={styles.periodTop}>薪資計算週期 {period.label}</Text>
+          <View style={styles.otTwoCol}>
+            <View style={styles.otStat}>
+              <Text style={styles.otStatLabel}>累計加班時數</Text>
+              <Text style={styles.otHours}>{otToDate}h</Text>
+              <Text style={styles.otStatSub}>至今日</Text>
+              {differentialToDate.totalHours > 0 ? (
+                <Text style={styles.otDiffNote}>含差額工時 {differentialToDate.totalHours}h</Text>
+              ) : null}
             </View>
-            {settings.differentialHoursEnabled ? (
-              <Text style={styles.otDifferentialNote}>包含差額工時 {differential.totalHours}h</Text>
-            ) : null}
+            <View style={styles.otDivider} />
+            <View style={styles.otStat}>
+              <Text style={styles.otStatLabel}>預計加班時數</Text>
+              <Text style={styles.otHours}>{otPeriod}h</Text>
+              <Text style={styles.otStatSub}>全期統計</Text>
+              {differentialPeriod.totalHours > 0 ? (
+                <Text style={styles.otDiffNote}>含差額工時 {differentialPeriod.totalHours}h</Text>
+              ) : null}
+            </View>
           </View>
         </Card>
 
@@ -209,31 +233,34 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   otCard: {
-    flexDirection: "row",
-    alignItems: "center",
     padding: 16,
     marginBottom: 16,
     gap: 14,
   },
-  otIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: "rgba(17,146,143,0.12)",
+  periodTop: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.teal,
+    textAlign: "center",
+  },
+  otTwoCol: {
+    flexDirection: "row",
+    alignItems: "stretch",
+  },
+  otStat: {
+    flex: 1,
     alignItems: "center",
-    justifyContent: "center",
+    gap: 2,
   },
+  otDivider: {
+    width: 1,
+    backgroundColor: colors.border,
+    marginHorizontal: 12,
+  },
+  otStatLabel: { fontSize: 12, color: colors.muted, textAlign: "center" },
   otHours: { fontSize: 28, fontWeight: "800", color: colors.text, marginTop: 2 },
-  otLabel: { fontSize: 13, color: colors.teal },
-  otCardRight: { alignItems: "flex-end", alignSelf: "stretch", justifyContent: "flex-start" },
-  otDifferentialNote: { fontSize: 11, color: colors.muted, marginTop: 6, textAlign: "right" },
-  periodChip: {
-    backgroundColor: colors.greyBg,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-  },
-  periodChipText: { fontSize: 11, fontWeight: "600", color: colors.muted },
+  otStatSub: { fontSize: 11, color: colors.muted, marginTop: 2 },
+  otDiffNote: { fontSize: 11, color: colors.muted, marginTop: 4, textAlign: "center" },
   twoCol: { gap: 12 },
   halfCard: { padding: 16, marginBottom: 4 },
   cardTitleRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" },
