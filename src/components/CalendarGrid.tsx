@@ -1,7 +1,7 @@
 import MarqueeText from "@/src/components/MarqueeText";
 import { cardShadow, colors } from "@/src/components/theme";
 import { snapTimeToQuarter } from "@/src/components/WheelTimePicker";
-import { clampOvertimeNote } from "@/src/constants/overtimeNotes";
+import { flattenOvertimeNoteForDisplay } from "@/src/constants/overtimeNotes";
 import {
   addDays,
   addMonths,
@@ -571,7 +571,7 @@ export default function CalendarGrid({
 
           const hasEarlyExt = !!earlySlotBg;
           const hasLateExt = !!lateSlotBg;
-          const noteText = clampOvertimeNote(ot?.notes?.trim() ?? "");
+          const noteText = flattenOvertimeNoteForDisplay(ot?.notes ?? "");
           const showOvertimeNote =
             isOvertimeMode && !compactSchedule && inCurrentMonth && !!noteText;
           /** 有提早方塊 → 正班下；僅延後方塊 → 正班上；皆無 → 預設正班下 */
@@ -1144,7 +1144,7 @@ const styles = StyleSheet.create({
     overflow: "visible",
   },
   noteTextRowBelow: {
-    top: 0,
+    bottom: 0,
   },
   noteTextRowAbove: {
     bottom: 0,

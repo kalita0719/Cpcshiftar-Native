@@ -19,7 +19,11 @@ import {
   validateHolidayWorkOverlap,
 } from "@/src/logic/holidayOvertime";
 import { useAppData } from "@/src/state/AppDataContext";
-import { clampOvertimeNote, OVERTIME_NOTE_MAX_LENGTH } from "@/src/constants/overtimeNotes";
+import {
+  applyOvertimeNoteInput,
+  finalizeOvertimeNote,
+  OVERTIME_NOTE_MAX_LENGTH,
+} from "@/src/constants/overtimeNotes";
 import type { Overtime, ShiftItem } from "@/src/types";
 
 const DAY_ZH = ["日", "一", "二", "三", "四", "五", "六"];
@@ -60,7 +64,7 @@ export default function HolidayOvertimeModal({ visible, onClose, date, existing,
       setWorkStart("09:00");
       setWorkEnd("17:00");
     }
-    setNotes(clampOvertimeNote(existing?.notes ?? ""));
+    setNotes(finalizeOvertimeNote(existing?.notes ?? ""));
     setDisasterStop(!!existing?.disasterStop);
   }, [visible, existing]);
 
@@ -79,8 +83,8 @@ export default function HolidayOvertimeModal({ visible, onClose, date, existing,
     [workStart, workEnd],
   );
 
-  const trimmedNotes = clampOvertimeNote(notes.trim());
-  const existingNotes = clampOvertimeNote(existing?.notes ?? "");
+  const trimmedNotes = finalizeOvertimeNote(notes.trim());
+  const existingNotes = finalizeOvertimeNote(existing?.notes ?? "");
   const canSaveSchedule = hours > 0 && !overlapError;
   const canSaveNotes = trimmedNotes !== existingNotes;
 
@@ -221,18 +225,8 @@ export default function HolidayOvertimeModal({ visible, onClose, date, existing,
             </View>
 
             <View style={styles.notesSection}>
-              <Text style={styles.notesSectionTitle}>備註</Text>
-              <View style={styles.notesRow}>
-                <TextInput
-                  value={notes}
-                  onChangeText={(t) => setNotes(clampOvertimeNote(t))}
-                  placeholder={`選填，最多 ${OVERTIME_NOTE_MAX_LENGTH} 字`}
-                  placeholderTextColor={colors.muted}
-                  maxLength={OVERTIME_NOTE_MAX_LENGTH}
-                  style={styles.notes}
-                  onFocus={() => setNotesFocused(true)}
-                  onBlur={() => setNotesFocused(false)}
-                />
+              <View style={styles.notesSectionHead}>
+                <Text style={styles.notesSectionTitle}>備註</Text>
                 <Pressable
                   onPress={saveNotes}
                   disabled={!canSaveNotes}
@@ -246,6 +240,20 @@ export default function HolidayOvertimeModal({ visible, onClose, date, existing,
                   </Text>
                 </Pressable>
               </View>
+              <TextInput
+                value={notes}
+                onChangeText={(t) => setNotes(applyOvertimeNoteInput(t))}
+                placeholder={`選填，最多 ${OVERTIME_NOTE_MAX_LENGTH} 字；換行自動編號`}
+                placeholderTextColor={colors.muted}
+                multiline
+                textAlignVertical="top"
+                style={styles.notes}
+                onFocus={() => setNotesFocused(true)}
+                onBlur={() => {
+                  setNotesFocused(false);
+                  setNotes(finalizeOvertimeNote(notes));
+                }}
+              />
             </View>
           </View>
         </View>
@@ -372,19 +380,22 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
+  notesSectionHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+    gap: 8,
+  },
   notesSectionTitle: {
     fontSize: 13,
     fontWeight: "700",
     color: colors.text,
-    marginBottom: 8,
-  },
-  notesRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
   },
   notes: {
-    flex: 1,
+    alignSelf: "stretch",
+    minHeight: 72,
+    maxHeight: 160,
     borderRadius: 12,
     backgroundColor: colors.greyBg,
     paddingHorizontal: 14,
@@ -393,11 +404,12 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   notesConfirm: {
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   notesConfirmText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });
