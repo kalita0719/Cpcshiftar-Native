@@ -60,7 +60,80 @@ export function premiumAwardWorkHours(shift: ShiftItem, ot?: Overtime | null): n
   return Math.min(h, PREMIUM_AWARD_MAX_HOURS);
 }
 
+function pushPremiumRows(
+  rows: NationalHolidayPayRow[],
+  shift: ShiftItem,
+  ot: Overtime | undefined,
+  hourlyRate: number,
+  holidayName: string,
+  level: HolidayLevelKey,
+) {
+  const isRestDay = isRestDayShift(shift);
+  const nationalHours = nationalHolidayWorkHours(shift, ot);
+  if (nationalHours > 0) {
+    rows.push({
+      date: shift.date,
+      holidayName,
+      level,
+      kind: "national",
+      hours: nationalHours,
+      pay: hourlyRate * nationalHours,
+      isRestDay,
+    });
+  }
+
+  if (level === "PREMIUM") {
+    const awardHours = premiumAwardWorkHours(shift, ot);
+    if (awardHours > 0) {
+      rows.push({
+        date: shift.date,
+        holidayName,
+        level,
+        kind: "award",
+        hours: awardHours,
+        pay: hourlyRate * awardHours,
+        isRestDay: false,
+      });
+    }
+  }
+}
+
+function summarizeRows(rows: NationalHolidayPayRow[]): NationalHolidayPaySummary {
+  rows.sort((a, b) => a.date.localeCompare(b.date) || (a.kind === "national" ? -1 : 1));
+  return {
+    rows,
+    totalHours: rows.reduce((s, r) => s + r.hours, 0),
+    totalPay: rows.reduce((s, r) => s + r.pay, 0),
+  };
+}
+
+/**
+ * 國定假日加班費。
+ * @param skipDisasterStopDates 天災停班費啟用時略過已標記天災之日，避免與天災 PREMIUM 重複計費。
+ */
 export function computeNationalHolidayPay(
+  periodShifts: ShiftItem[],
+  overtimeByDate: Map<string, Overtime>,
+  hourlyRate: number,
+  skipDisasterStopDates = false,
+): NationalHolidayPaySummary {
+  const rows: NationalHolidayPayRow[] = [];
+
+  for (const shift of periodShifts) {
+    const ot = overtimeByDate.get(shift.date);
+    if (skipDisasterStopDates && ot?.disasterStop) continue;
+
+    const holiday = getNationalHoliday(shift.date);
+    if (!holiday) continue;
+
+    pushPremiumRows(rows, shift, ot, hourlyRate, holiday.name, holiday.level);
+  }
+
+  return summarizeRows(rows);
+}
+
+/** 天然災害停班日：依 PREMIUM 規則計費（與國定假日開關互不連動）。 */
+export function computeDisasterStopPay(
   periodShifts: ShiftItem[],
   overtimeByDate: Map<string, Overtime>,
   hourlyRate: number,
@@ -68,45 +141,10 @@ export function computeNationalHolidayPay(
   const rows: NationalHolidayPayRow[] = [];
 
   for (const shift of periodShifts) {
-    const holiday = getNationalHoliday(shift.date);
-    if (!holiday) continue;
-
     const ot = overtimeByDate.get(shift.date);
-    const isRestDay = isRestDayShift(shift);
-    const nationalHours = nationalHolidayWorkHours(shift, ot);
-    if (nationalHours > 0) {
-      rows.push({
-        date: shift.date,
-        holidayName: holiday.name,
-        level: holiday.level,
-        kind: "national",
-        hours: nationalHours,
-        pay: hourlyRate * nationalHours,
-        isRestDay,
-      });
-    }
-
-    if (holiday.level === "PREMIUM") {
-      const awardHours = premiumAwardWorkHours(shift, ot);
-      if (awardHours > 0) {
-        rows.push({
-          date: shift.date,
-          holidayName: holiday.name,
-          level: holiday.level,
-          kind: "award",
-          hours: awardHours,
-          pay: hourlyRate * awardHours,
-          isRestDay: false,
-        });
-      }
-    }
+    if (!ot?.disasterStop) continue;
+    pushPremiumRows(rows, shift, ot, hourlyRate, "天災停班", "PREMIUM");
   }
 
-  rows.sort((a, b) => a.date.localeCompare(b.date) || (a.kind === "national" ? -1 : 1));
-
-  return {
-    rows,
-    totalHours: rows.reduce((s, r) => s + r.hours, 0),
-    totalPay: rows.reduce((s, r) => s + r.pay, 0),
-  };
+  return summarizeRows(rows);
 }

@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Keyboard,
+  KeyboardAvoidingView,
   LayoutChangeEvent,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -61,6 +64,17 @@ const RULER_NUM_H = 18;
 const RULER_GAP = 4;
 const TICK_MAJOR_H = 10;
 const TICK_MINOR_H = 5;
+/** 與 MultiSlider 預設高度一致，避免切換 tab 時卡片跳動 */
+const PANEL_SLIDER_H = 50;
+const PANEL_SLOT_MIN_H =
+  36 + // timeLine minHeight
+  8 + // timeLine marginBottom
+  RULER_NUM_H +
+  RULER_GAP +
+  TICK_MAJOR_H +
+  4 + // ruler marginBottom
+  PANEL_SLIDER_H +
+  8; // sliderWrap marginBottom
 
 const rulerLabelStyle = {
   lineHeight: RULER_NUM_H,
@@ -309,7 +323,7 @@ function OtCenterSlider({
   return (
     <View
       ref={wrapRef}
-      style={{ width: trackW, height: THUMB, justifyContent: "center" }}
+      style={{ width: trackW, height: PANEL_SLIDER_H, justifyContent: "center" }}
       {...pan.panHandlers}
     >
       <View
@@ -317,6 +331,7 @@ function OtCenterSlider({
           position: "absolute",
           left: THUMB / 2,
           right: THUMB / 2,
+          top: (PANEL_SLIDER_H - OT_TRACK_H) / 2,
           height: OT_TRACK_H,
           borderRadius: 4,
           backgroundColor: "#e2e8f0",
@@ -329,7 +344,7 @@ function OtCenterSlider({
             height: OT_TRACK_H,
             borderRadius: 4,
             backgroundColor: color,
-            top: (THUMB - OT_TRACK_H) / 2,
+            top: (PANEL_SLIDER_H - OT_TRACK_H) / 2,
             ...fillStyle,
           }}
         />
@@ -340,7 +355,7 @@ function OtCenterSlider({
           left: centerX - 1,
           width: 2,
           height: OT_TRACK_H + 4,
-          top: (THUMB - OT_TRACK_H) / 2 - 2,
+          top: (PANEL_SLIDER_H - OT_TRACK_H) / 2 - 2,
           backgroundColor: "#94a3b8",
           borderRadius: 1,
         }}
@@ -349,6 +364,7 @@ function OtCenterSlider({
         style={{
           position: "absolute",
           left: thumbX - THUMB / 2,
+          top: (PANEL_SLIDER_H - THUMB) / 2,
           width: THUMB,
           height: THUMB,
           borderRadius: THUMB / 2,
@@ -400,13 +416,17 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
   const ho = handoverEnabled ? HO : 0;
 
   const [tab, setTab] = useState<Tab>("加班");
-  // 加班：單值，正數=延時，負數=提早
+  /** 加班／上課滑桿對應類型（切到請假 tab 時仍保留，以便同日合併儲存）。 */
+  const [otKind, setOtKind] = useState<"加班" | "上課">("加班");
+  // 加班／上課：單值，正數=延時，負數=提早
   const [sliderValue, setSliderValue] = useState(0);
   // 請假：[startPos, endPos]，單位 = 分鐘（相對班次開始）
   const [leaveRange, setLeaveRange] = useState<[number, number]>([0, 0]);
   const [notes, setNotes] = useState("");
+  const [disasterStop, setDisasterStop] = useState(false);
   // 容器寬度供加班軌道繪製
   const [trackW, setTrackW] = useState(280);
+  const [notesFocused, setNotesFocused] = useState(false);
 
   const shiftStartMin = useMemo(() => timeToMin(shift?.startTime ?? "00:00"), [shift?.startTime]);
   const shiftEndMin = useMemo(() => timeToMin(shift?.endTime ?? "00:00"), [shift?.endTime]);
@@ -422,32 +442,53 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
     [shiftDurationMin],
   );
 
-  /* ── 打開彈窗時還原既有紀錄 ── */
+  useEffect(() => {
+    if (!visible) setNotesFocused(false);
+  }, [visible]);
+
+  /* ── 打開彈窗時還原既有紀錄（加班與請假可並存，兩邊都還原） ── */
   useEffect(() => {
     if (!visible) return;
-    if (existing?.leaveStart && existing?.leaveEnd) {
-      setTab("請假");
-      const s = timeStrToPos(existing.leaveStart, shiftStartMin);
-      const e = timeStrToPos(existing.leaveEnd, shiftStartMin);
+
+    const hasLeave = !!(existing?.leaveStart && existing?.leaveEnd);
+    if (hasLeave) {
+      const s = timeStrToPos(existing!.leaveStart!, shiftStartMin);
+      const e = timeStrToPos(existing!.leaveEnd!, shiftStartMin);
       setLeaveRange([s, e]);
-    } else if ((existing?.earlyHours ?? 0) > 0) {
-      setTab("加班");
-      setSliderValue(-Number(existing!.earlyHours));
-    } else if ((existing?.lateHours ?? 0) > 0) {
-      setTab("加班");
-      setSliderValue(Number(existing!.lateHours));
-    } else if ((existing?.earlyClassHours ?? 0) > 0) {
-      setTab("上課");
-      setSliderValue(-Number(existing!.earlyClassHours));
-    } else if ((existing?.lateClassHours ?? 0) > 0) {
-      setTab("上課");
-      setSliderValue(Number(existing!.lateClassHours));
     } else {
-      setTab("加班");
-      setSliderValue(0);
       setLeaveRange(defaultFullLeaveRange(shiftDurationMin));
     }
+
+    const earlyH = existing?.earlyHours ?? 0;
+    const lateH = existing?.lateHours ?? 0;
+    const earlyClass = existing?.earlyClassHours ?? 0;
+    const lateClass = existing?.lateClassHours ?? 0;
+    const hasOt = earlyH > 0 || lateH > 0;
+    const hasClass = earlyClass > 0 || lateClass > 0;
+
+    if (earlyH > 0) {
+      setOtKind("加班");
+      setSliderValue(-Number(earlyH));
+    } else if (lateH > 0) {
+      setOtKind("加班");
+      setSliderValue(Number(lateH));
+    } else if (earlyClass > 0) {
+      setOtKind("上課");
+      setSliderValue(-Number(earlyClass));
+    } else if (lateClass > 0) {
+      setOtKind("上課");
+      setSliderValue(Number(lateClass));
+    } else {
+      setOtKind("加班");
+      setSliderValue(0);
+    }
+
+    if (hasLeave && !hasOt && !hasClass) setTab("請假");
+    else if (hasClass && !hasOt) setTab("上課");
+    else setTab("加班");
+
     setNotes(clampOvertimeNote(existing?.notes ?? ""));
+    setDisasterStop(!!existing?.disasterStop);
   }, [visible, existing, shiftStartMin, shiftDurationMin]);
 
   /* ── 切到「請假」tab 時：無既有請假則預設整段上班時間 */
@@ -462,7 +503,9 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
   const isEarly = sliderValue < 0;
   const isLate = sliderValue > 0;
   const direction = isEarly ? "提早" : isLate ? "延時" : "";
-  const typeColor = tab === "加班" ? "#f97316" : tab === "上課" ? "#3b82f6" : colors.leave;
+  const activeOtKind = tab === "上課" || tab === "加班" ? tab : otKind;
+  const typeColor =
+    tab === "請假" ? colors.leave : activeOtKind === "上課" ? "#3b82f6" : "#f97316";
   const baseStart = shift?.startTime ?? "--:--";
   const baseEnd = shift?.endTime ?? "--:--";
   const dispStart = isEarly ? shiftTimeStr(baseStart, sliderValue - ho) : baseStart;
@@ -479,51 +522,58 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
     if (w > 10) setTrackW(w);
   };
 
-  /* ── 儲存 ── */
+  /* ── 儲存：加班／請假與備註分區確認 ── */
   const trimmedNotes = clampOvertimeNote(notes.trim());
-  const hasNotes = trimmedNotes.length > 0;
+  const existingNotes = clampOvertimeNote(existing?.notes ?? "");
+  const notesDirty = trimmedNotes !== existingNotes;
   const savingLeave = tab === "請假" && !!shift && leaveEndPos > leaveStartPos;
   const savingOtHours = tab !== "請假" && hours > 0;
-  const canSave = savingLeave || savingOtHours || hasNotes;
+  const canSaveSchedule = savingLeave || savingOtHours;
+  const canSaveNotes = notesDirty;
 
-  const save = () => {
-    if (!canSave) return;
+  const saveSchedule = () => {
+    if (!canSaveSchedule) return;
 
-    if (savingLeave) {
-      upsertOvertime({
-        date,
-        earlyHours: 0,
-        lateHours: 0,
-        earlyClassHours: 0,
-        lateClassHours: 0,
-        leaveStart: leaveStartTimeStr,
-        leaveEnd: leaveEndTimeStr,
-        notes: trimmedNotes || undefined,
-      });
-    } else if (savingOtHours) {
-      upsertOvertime({
-        date,
-        earlyHours: tab === "加班" && isEarly ? hours : 0,
-        lateHours: tab === "加班" && isLate ? hours : 0,
-        earlyClassHours: tab === "上課" && isEarly ? hours : 0,
-        lateClassHours: tab === "上課" && isLate ? hours : 0,
-        leaveStart: null,
-        leaveEnd: null,
-        notes: trimmedNotes || undefined,
-      });
-    } else {
-      upsertOvertime({
-        date,
-        earlyHours: existing?.earlyHours ?? 0,
-        lateHours: existing?.lateHours ?? 0,
-        earlyClassHours: existing?.earlyClassHours ?? 0,
-        lateClassHours: existing?.lateClassHours ?? 0,
-        leaveStart: existing?.leaveStart ?? null,
-        leaveEnd: existing?.leaveEnd ?? null,
-        notes: trimmedNotes || undefined,
-      });
-    }
+    const kindForOt = tab === "上課" || tab === "加班" ? tab : otKind;
+    const nextOt = {
+      earlyHours: kindForOt === "加班" && isEarly ? hours : 0,
+      lateHours: kindForOt === "加班" && isLate ? hours : 0,
+      earlyClassHours: kindForOt === "上課" && isEarly ? hours : 0,
+      lateClassHours: kindForOt === "上課" && isLate ? hours : 0,
+    };
 
+    const nextLeave =
+      tab === "請假"
+        ? savingLeave
+          ? { leaveStart: leaveStartTimeStr, leaveEnd: leaveEndTimeStr }
+          : { leaveStart: null as string | null, leaveEnd: null as string | null }
+        : {
+            leaveStart: existing?.leaveStart ?? null,
+            leaveEnd: existing?.leaveEnd ?? null,
+          };
+
+    // 不傳 notes，保留既有備註
+    upsertOvertime({
+      date,
+      ...nextOt,
+      ...nextLeave,
+    });
+
+    onClose();
+  };
+
+  const saveNotes = () => {
+    if (!canSaveNotes) return;
+    upsertOvertime({
+      date,
+      earlyHours: existing?.earlyHours ?? 0,
+      lateHours: existing?.lateHours ?? 0,
+      earlyClassHours: existing?.earlyClassHours ?? 0,
+      lateClassHours: existing?.lateClassHours ?? 0,
+      leaveStart: existing?.leaveStart ?? null,
+      leaveEnd: existing?.leaveEnd ?? null,
+      notes: trimmedNotes,
+    });
     onClose();
   };
 
@@ -534,15 +584,60 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
-        <View style={[styles.card, cardShadow(8)]}>
+      <KeyboardAvoidingView
+        style={styles.keyboardRoot}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+      >
+        <View style={[styles.overlay, notesFocused && styles.overlayKeyboard]}>
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={() => {
+              Keyboard.dismiss();
+              onClose();
+            }}
+          />
+          <View style={[styles.card, cardShadow(8)]}>
           {/* 標題 */}
           <View style={styles.head}>
-            <View>
+            <View style={{ flex: 1, paddingRight: 8 }}>
               <Text style={styles.title}>加班/請假紀錄</Text>
               <Text style={styles.sub}>{formatDateLabel(date)}</Text>
             </View>
+            <Pressable
+              onPress={() => {
+                const next = !disasterStop;
+                setDisasterStop(next);
+                upsertOvertime({
+                  date,
+                  earlyHours: existing?.earlyHours ?? 0,
+                  lateHours: existing?.lateHours ?? 0,
+                  earlyClassHours: existing?.earlyClassHours ?? 0,
+                  lateClassHours: existing?.lateClassHours ?? 0,
+                  leaveStart: existing?.leaveStart ?? null,
+                  leaveEnd: existing?.leaveEnd ?? null,
+                  disasterStop: next,
+                });
+              }}
+              style={[styles.disasterBtn, disasterStop && styles.disasterBtnOn]}
+            >
+              <Text
+                style={[
+                  styles.disasterBtnEmoji,
+                  disasterStop && styles.disasterBtnTextOn,
+                ]}
+              >
+                {"\u{1F300}"}
+              </Text>
+              <Text
+                style={[
+                  styles.disasterBtnText,
+                  disasterStop && styles.disasterBtnTextOn,
+                ]}
+              >
+                天災停班
+              </Text>
+            </Pressable>
             <Pressable onPress={onClose} style={styles.closeBtn}>
               <X size={18} color={colors.text} />
             </Pressable>
@@ -553,7 +648,10 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
             {(["加班", "上課", "請假"] as const).map((t) => (
               <Pressable
                 key={t}
-                onPress={() => setTab(t)}
+                onPress={() => {
+                  setTab(t);
+                  if (t === "加班" || t === "上課") setOtKind(t);
+                }}
                 style={[
                   styles.tab,
                   tab === t && {
@@ -567,129 +665,156 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
             ))}
           </View>
 
-          {/* ── 加班 / 上課 滑桿 ─────────────────────────────── */}
-          {tab !== "請假" && (
-            <>
-              <View style={styles.timeLine}>
-                {hours > 0 ? (
-                  <>
-                    <Text style={[styles.bigTime, { color: typeColor }]}>
-                      {dispStart} — {dispEnd}
-                    </Text>
-                    <Text style={[styles.otHoursLine, { color: typeColor }]}>
-                      {direction} {hours}h
-                    </Text>
-                  </>
-                ) : (
-                  <Text style={styles.mutedTime}>{baseStart} — {baseEnd}</Text>
-                )}
-              </View>
+          {/* ── 加班／上課／請假 內容（固定高度避免切換跳動） ── */}
+          <View style={styles.panelSlot}>
+            {tab !== "請假" ? (
+              <>
+                <View style={styles.timeLine}>
+                  <Text
+                    style={[
+                      styles.timeRange,
+                      hours > 0 ? styles.bigTime : styles.mutedTime,
+                      hours > 0 && { color: typeColor },
+                    ]}
+                  >
+                    {hours > 0 ? `${dispStart} — ${dispEnd}` : `${baseStart} — ${baseEnd}`}
+                  </Text>
+                  <View style={styles.otHoursSlot}>
+                    {hours > 0 ? (
+                      <Text style={[styles.otHoursLine, { color: typeColor }]}>
+                        {direction} {hours}h
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
 
-              <View style={styles.sliderWrap} onLayout={onTrackLayout}>
-                <OtRuler trackW={trackW} />
-                <OtCenterSlider
-                  value={sliderValue}
-                  onChange={setSliderValue}
-                  color={typeColor}
-                  trackW={trackW}
-                />
-              </View>
-            </>
-          )}
-
-          {/* ── 請假 雙拇指 Range Slider ─────────────────────── */}
-          {tab === "請假" && (
-            <View style={{ marginBottom: 16 }}>
-              {!shift ? (
+                <View style={styles.sliderWrap} onLayout={onTrackLayout}>
+                  <OtRuler trackW={trackW} />
+                  <OtCenterSlider
+                    value={sliderValue}
+                    onChange={setSliderValue}
+                    color={typeColor}
+                    trackW={trackW}
+                  />
+                </View>
+              </>
+            ) : !shift ? (
+              <View style={styles.panelEmpty}>
                 <Text style={styles.warn}>此日無班次，無法新增請假紀錄</Text>
-              ) : (
-                <>
-                  <View style={styles.timeLine}>
-                    <Text style={[styles.bigTime, { color: colors.leave }]}>
-                      {leaveStartTimeStr} — {leaveEndTimeStr}{"  "}請假{" "}
-                      {Math.round((leaveEndPos - leaveStartPos) / 30) / 2}h
+              </View>
+            ) : (
+              <>
+                <View style={styles.timeLine}>
+                  <Text style={[styles.timeRange, styles.bigTime, { color: colors.leave }]}>
+                    {leaveStartTimeStr} — {leaveEndTimeStr}
+                  </Text>
+                  <View style={styles.otHoursSlot}>
+                    <Text style={[styles.otHoursLine, { color: colors.leave }]}>
+                      請假 {Math.round((leaveEndPos - leaveStartPos) / 30) / 2}h
                     </Text>
                   </View>
+                </View>
 
-                  <View style={styles.sliderWrap} onLayout={onTrackLayout}>
-                    <LeaveRuler
-                      trackW={trackW}
-                      shiftStartMin={shiftStartMin}
-                      shift={shift}
-                      leaveOptions={leaveOptions}
-                    />
-                    <MultiSlider
-                      values={[leaveStartPos, leaveEndPos]}
-                      min={0}
-                      max={shiftDurationMin}
-                      step={LEAVE_STEP_MIN}
-                      sliderLength={trackW}
-                      // @ts-expect-error markerSize 執行期支援，型別定義未更新
-                      markerSize={THUMB}
-                      onValuesChange={(vals) => {
-                        setLeaveRange([vals[0], vals[1]]);
-                      }}
-                      selectedStyle={{ backgroundColor: colors.leave }}
-                      unselectedStyle={{ backgroundColor: "#e2e8f0" }}
-                      containerStyle={{ alignSelf: "flex-start", width: trackW }}
-                      trackStyle={{ height: 8, borderRadius: 4 }}
-                      customMarker={() => <LeaveThumb />}
-                      allowOverlap={false}
-                      snapped
-                      minMarkerOverlapDistance={30}
-                    />
-                  </View>
-
-                  <View style={styles.leaveLabels}>
-                    <Text style={styles.leaveLabel}>{leaveStartTimeStr} 開始</Text>
-                    <Text style={styles.leaveLabel}>{leaveEndTimeStr} 結束</Text>
-                  </View>
-                </>
-              )}
-            </View>
-          )}
-
-          {/* 備註 */}
-          <TextInput
-            value={notes}
-            onChangeText={(t) => setNotes(clampOvertimeNote(t))}
-            placeholder={`備註（選填，最多 ${OVERTIME_NOTE_MAX_LENGTH} 字）`}
-            placeholderTextColor={colors.muted}
-            maxLength={OVERTIME_NOTE_MAX_LENGTH}
-            style={styles.notes}
-          />
-
-          {/* 操作按鈕 */}
+                <View style={styles.sliderWrap} onLayout={onTrackLayout}>
+                  <LeaveRuler
+                    trackW={trackW}
+                    shiftStartMin={shiftStartMin}
+                    shift={shift}
+                    leaveOptions={leaveOptions}
+                  />
+                  <MultiSlider
+                    values={[leaveStartPos, leaveEndPos]}
+                    min={0}
+                    max={shiftDurationMin}
+                    step={LEAVE_STEP_MIN}
+                    sliderLength={trackW}
+                    height={PANEL_SLIDER_H}
+                    // @ts-expect-error markerSize 執行期支援，型別定義未更新
+                    markerSize={THUMB}
+                    onValuesChange={(vals) => {
+                      setLeaveRange([vals[0], vals[1]]);
+                    }}
+                    selectedStyle={{ backgroundColor: colors.leave }}
+                    unselectedStyle={{ backgroundColor: "#e2e8f0" }}
+                    containerStyle={{
+                      alignSelf: "flex-start",
+                      width: trackW,
+                      height: PANEL_SLIDER_H,
+                    }}
+                    trackStyle={{ height: 8, borderRadius: 4 }}
+                    customMarker={() => <LeaveThumb />}
+                    allowOverlap={false}
+                    snapped
+                    minMarkerOverlapDistance={30}
+                  />
+                </View>
+              </>
+            )}
+          </View>
+          {/* 加班／請假確認 */}
           <View style={styles.actions}>
             {existing ? (
-              <Pressable onPress={del} style={styles.trash}>
+              <Pressable onPress={del} style={[styles.trash, styles.trashAbsolute]}>
                 <Trash2 size={18} color={colors.destructive} />
               </Pressable>
-            ) : (
-              <View style={{ width: 48 }} />
-            )}
+            ) : null}
             <Pressable
-              onPress={save}
-              disabled={!canSave}
-              style={[styles.confirm, { backgroundColor: canSave ? typeColor : "#e2e8f0" }]}
+              onPress={saveSchedule}
+              disabled={!canSaveSchedule}
+              style={[styles.confirm, { backgroundColor: canSaveSchedule ? typeColor : "#e2e8f0" }]}
             >
-              <Text style={[styles.confirmText, !canSave && { color: colors.muted }]}>
-                {existing ? "更新" : "確認"}
+              <Text style={[styles.confirmText, !canSaveSchedule && { color: colors.muted }]}>
+                {existing ? "更新時段" : "確認時段"}
               </Text>
             </Pressable>
           </View>
+
+          {/* 備註（獨立區塊） */}
+          <View style={styles.notesSection}>
+            <Text style={styles.notesSectionTitle}>備註</Text>
+            <View style={styles.notesRow}>
+              <TextInput
+                value={notes}
+                onChangeText={(t) => setNotes(clampOvertimeNote(t))}
+                placeholder={`選填，最多 ${OVERTIME_NOTE_MAX_LENGTH} 字`}
+                placeholderTextColor={colors.muted}
+                maxLength={OVERTIME_NOTE_MAX_LENGTH}
+                style={styles.notes}
+                onFocus={() => setNotesFocused(true)}
+                onBlur={() => setNotesFocused(false)}
+              />
+              <Pressable
+                onPress={saveNotes}
+                disabled={!canSaveNotes}
+                style={[
+                  styles.notesConfirm,
+                  { backgroundColor: canSaveNotes ? colors.teal : "#e2e8f0" },
+                ]}
+              >
+                <Text style={[styles.notesConfirmText, !canSaveNotes && { color: colors.muted }]}>
+                  確認
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardRoot: { flex: 1 },
   overlay: {
     flex: 1,
     justifyContent: "center",
     padding: 20,
     backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  overlayKeyboard: {
+    justifyContent: "flex-end",
+    paddingBottom: 12,
   },
   card: {
     backgroundColor: colors.card,
@@ -698,8 +823,38 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  head: { flexDirection: "row", justifyContent: "space-between", marginBottom: 16 },
+  head: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+    gap: 8,
+  },
   title: { fontSize: 16, fontWeight: "700", color: colors.text },
+  disasterBtn: {
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: colors.greyBg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  disasterBtnOn: {
+    backgroundColor: "#fff7ed",
+    borderColor: "#f59e0b",
+  },
+  disasterBtnEmoji: { fontSize: 14, lineHeight: 16, textAlign: "center" },
+  disasterBtnText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.muted,
+    textAlign: "center",
+    lineHeight: 14,
+  },
+  disasterBtnTextOn: { color: "#b45309" },
   sub: { fontSize: 12, color: colors.teal, marginTop: 4, opacity: 0.85 },
   closeBtn: {
     width: 36,
@@ -708,6 +863,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.greyBg,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   tabs: {
     flexDirection: "row",
@@ -719,16 +875,39 @@ const styles = StyleSheet.create({
   },
   tab: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center" },
   tabText: { fontSize: 13, fontWeight: "700", color: colors.muted },
+  panelSlot: {
+    minHeight: PANEL_SLOT_MIN_H,
+  },
+  panelEmpty: {
+    flex: 1,
+    minHeight: PANEL_SLOT_MIN_H,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   timeLine: {
     minHeight: 36,
+    flexDirection: "row",
     justifyContent: "center",
-    marginBottom: 8,
     alignItems: "center",
-    gap: 4,
+    marginBottom: 8,
+    gap: 10,
   },
-  bigTime: { fontSize: 17, fontWeight: "700", textAlign: "center" },
-  otHoursLine: { fontSize: 15, fontWeight: "700", textAlign: "center" },
-  mutedTime: { fontSize: 13, color: colors.muted, textAlign: "center" },
+  timeRange: {
+    width: 170,
+    textAlign: "center",
+  },
+  bigTime: { fontSize: 17, fontWeight: "700" },
+  otHoursSlot: {
+    width: 96,
+    minHeight: 22,
+    justifyContent: "center",
+  },
+  otHoursLine: {
+    fontSize: 15,
+    fontWeight: "700",
+    textAlign: "left",
+  },
+  mutedTime: { fontSize: 17, fontWeight: "700", color: colors.muted },
   rulerNum: { fontSize: 10, color: "#94a3b8" },
   leaveRulerLabel: {
     position: "absolute",
@@ -742,24 +921,49 @@ const styles = StyleSheet.create({
     overflow: "visible",
   },
   edgeText: { fontSize: 10, color: colors.muted, fontWeight: "600" },
-  leaveLabels: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 4,
-    marginTop: 4,
-  },
-  leaveLabel: { color: colors.leave, fontSize: 11, fontWeight: "700" },
   warn: { textAlign: "center", color: colors.muted, paddingVertical: 12, fontSize: 13 },
+  actions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12,
+    position: "relative",
+    minHeight: 48,
+  },
+  notesSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  notesSectionTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.text,
+    marginBottom: 8,
+  },
+  notesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   notes: {
+    flex: 1,
     borderRadius: 12,
     backgroundColor: colors.greyBg,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
-    marginBottom: 14,
     color: colors.text,
   },
-  actions: { flexDirection: "row", alignItems: "center", gap: 12 },
+  notesConfirm: {
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notesConfirmText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   trash: {
     width: 48,
     height: 48,
@@ -768,6 +972,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  confirm: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: "center" },
+  trashAbsolute: {
+    position: "absolute",
+    left: 0,
+    zIndex: 1,
+  },
+  confirm: {
+    minWidth: "55%",
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    alignItems: "center",
+  },
   confirmText: { color: "#fff", fontWeight: "700", fontSize: 15 },
 });

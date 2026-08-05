@@ -12,7 +12,6 @@ import { shiftTime, timeToMin } from "@/src/logic/shiftLogic";
 import type { Overtime, ShiftItem } from "@/src/types";
 
 const MS_MIN = 60 * 1000;
-const DAY_MS = 1440 * MS_MIN;
 const MIN_DURATION_MS = 15 * MS_MIN;
 
 export type OccupiedRange = { startMs: number; endMs: number };
@@ -24,37 +23,22 @@ function parseAbs(date: string, time: string): number {
   return d.getTime();
 }
 
-/** 單段上下班 → 絕對時間（跨日 end < start 時 end 推到隔日） */
+/** 單段上下班 → 絕對時間。
+ * 班表日 = 早上下班日：若結束時刻 ≤ 開始時刻（跨日），開始落在前一日、結束在班表日
+ *（例：7/2 的 23:00–08:00 → 7/1 23:00～7/2 08:00）。
+ */
 export function spanFromTimes(date: string, startTime: string, endTime: string): OccupiedRange {
-  let startMs = parseAbs(date, startTime);
-  let endMs = parseAbs(date, endTime);
-  if (endMs <= startMs) endMs += DAY_MS;
-  return { startMs, endMs };
+  const startMin = timeToMin(snapTimeToQuarter(startTime));
+  const endMin = timeToMin(snapTimeToQuarter(endTime));
+  if (endMin <= startMin) {
+    const prev = formatYMD(addDays(parseYMD(date), -1));
+    return { startMs: parseAbs(prev, startTime), endMs: parseAbs(date, endTime) };
+  }
+  return { startMs: parseAbs(date, startTime), endMs: parseAbs(date, endTime) };
 }
 
 export function rangesOverlap(a: OccupiedRange, b: OccupiedRange): boolean {
   return Math.max(a.startMs, b.startMs) < Math.min(a.endMs, b.endMs);
-}
-
-/** 班表結束時間在隔日清晨（如 23:00–07:00） */
-function shiftEndsAfterMidnight(shift: Pick<ShiftItem, "startTime" | "endTime">): boolean {
-  return timeToMin(shift.endTime) <= timeToMin(shift.startTime);
-}
-
-function dayStartMs(ymd: string): number {
-  return parseAbs(ymd, "00:00");
-}
-
-/** 與 [intervalStart, intervalEnd) 交集；無交集回傳 null */
-function clipRangeToInterval(
-  r: OccupiedRange,
-  intervalStart: number,
-  intervalEnd: number,
-): OccupiedRange | null {
-  const startMs = Math.max(r.startMs, intervalStart);
-  const endMs = Math.min(r.endMs, intervalEnd);
-  if (startMs >= endMs) return null;
-  return { startMs, endMs };
 }
 
 export function hasHolidayWork(ot?: Overtime | null): boolean {
@@ -68,7 +52,7 @@ export function holidayWorkHours(ot: Pick<Overtime, "holidayWorkStart" | "holida
   return Math.round((endMs - startMs) / MS_MIN) / 60;
 }
 
-/** 上班日有請假紀錄（與加班／上課互斥）。 */
+/** 上班日有請假紀錄。 */
 export function hasWorkdayLeave(ot?: Pick<Overtime, "leaveStart" | "leaveEnd"> | null): boolean {
   return !!(ot?.leaveStart && ot?.leaveEnd);
 }
@@ -78,12 +62,11 @@ export function recordedOvertimeHours(ot: Overtime, shift?: ShiftItem | null): n
   if (shift && isRestDayShift(shift) && hasHolidayWork(ot)) {
     return holidayWorkHours(ot);
   }
-  if (hasWorkdayLeave(ot)) return 0;
   return (ot.earlyHours ?? 0) + (ot.lateHours ?? 0);
 }
 
 function otAllowanceInput(ot?: Overtime | null): ShiftAllowanceOvertime | null {
-  if (!ot || hasWorkdayLeave(ot)) return null;
+  if (!ot) return null;
   return {
     earlyHours: ot.earlyHours,
     lateHours: ot.lateHours,
@@ -177,39 +160,15 @@ export function getOccupiedRangesForDate(
 }
 
 /**
- * 休假日重疊檢查用佔用區間。
- * - 休假日當日跨日班：含隔日清晨（5/20 22:45 與 5/21 清晨段）
- * - 前一日跨日班：不含休假日清晨尾段（5/22 夜班不擋 5/23 休假日）
+ * 休假日重疊檢查用佔用區間（一般班次；跨日已依「班表日＝早上下班日」展開）。
  */
 function occupiedRangesForOverlapCheck(
   shift: ShiftItem,
   ot: Overtime | undefined,
-  holidayDate: string,
   handoverEnabled: boolean,
 ): OccupiedRange[] {
   if (isRestDayShift(shift)) return [];
-
-  const raw = getOccupiedRangesForDate(
-    shift.date,
-    shift,
-    ot,
-    handoverEnabled,
-    false,
-    false,
-  );
-  const holidayStart = dayStartMs(holidayDate);
-  const prevD = formatYMD(addDays(parseYMD(holidayDate), -1));
-
-  const out: OccupiedRange[] = [];
-  for (const r of raw) {
-    if (shift.date === prevD && shiftEndsAfterMidnight(shift)) {
-      const eveningOnly = clipRangeToInterval(r, Number.NEGATIVE_INFINITY, holidayStart);
-      if (eveningOnly) out.push(eveningOnly);
-      continue;
-    }
-    out.push(r);
-  }
-  return out;
+  return getOccupiedRangesForDate(shift.date, shift, ot, handoverEnabled, false, false);
 }
 
 /** 休假日上班是否與前後日佔用時段重疊 */
@@ -223,17 +182,15 @@ export function validateHolidayWorkOverlap(
 ): string | null {
   const st = snapTimeToQuarter(startTime);
   const et = snapTimeToQuarter(endTime);
-  const { startMs, endMs } = spanFromTimes(date, st, et);
-  if (endMs - startMs < MIN_DURATION_MS) return "上班時段至少 15 分鐘";
-
   const proposed = spanFromTimes(date, st, et);
+  if (proposed.endMs - proposed.startMs < MIN_DURATION_MS) return "上班時段至少 15 分鐘";
+
   const otByDate = new Map(overtime.map((o) => [o.date, o]));
 
   for (const shift of shifts) {
     const ranges = occupiedRangesForOverlapCheck(
       shift,
       otByDate.get(shift.date),
-      date,
       handoverEnabled,
     );
     for (const r of ranges) {

@@ -13,6 +13,9 @@ type Props = {
   hideAd?: boolean;
 };
 
+/** 暫關橫幅廣告；改回 false 即可恢復 */
+const ADS_TEMPORARILY_DISABLED = true;
+
 export default function ScreenLayout({
   children,
   edges = ["top"],
@@ -20,9 +23,11 @@ export default function ScreenLayout({
   contentStyle,
   hideAd = false,
 }: Props) {
+  const showAd = !ADS_TEMPORARILY_DISABLED && !hideAd;
+
   return (
     <SafeAreaView style={[styles.safe, style]} edges={edges}>
-      {!hideAd && <AdBannerSlot />}
+      {showAd ? <AdBannerSlot /> : null}
       <View style={[styles.content, contentStyle]}>{children}</View>
     </SafeAreaView>
   );

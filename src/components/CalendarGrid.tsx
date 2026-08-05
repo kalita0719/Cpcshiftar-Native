@@ -529,12 +529,6 @@ export default function CalendarGrid({
                 {snapTimeToQuarter(shiftTime(ot.holidayWorkStart!, -ho))}
               </Text>
             );
-          } else if (!compactSchedule && isLeave && shift) {
-            if (lCase === 12) {
-              earlyContent = leaveTimeRow(leaveStart!, "early");
-            } else if (lCase === 10) {
-              earlyContent = leaveTimeRow(leaveEnd!, "early");
-            }
           } else if (!compactSchedule && inCurrentMonth && isWork && ot) {
             const earlyHours = ot.earlyHours ?? 0;
             const earlyClass = ot.earlyClassHours ?? 0;
@@ -544,7 +538,11 @@ export default function CalendarGrid({
             } else if (earlyClass > 0) {
               earlySlotBg = shiftExtensionBackground(shift);
               earlyContent = classTimeRow(shiftTime(shift!.startTime, -(earlyClass + ho)), shiftToneColor!, "early");
+            } else if (isLeave && shift && (lCase === 12 || lCase === 10)) {
+              earlyContent = leaveTimeRow(lCase === 12 ? leaveStart! : leaveEnd!, "early");
             }
+          } else if (!compactSchedule && isLeave && shift && (lCase === 12 || lCase === 10)) {
+            earlyContent = leaveTimeRow(lCase === 12 ? leaveStart! : leaveEnd!, "early");
           }
 
           let lateContent: React.ReactNode = null;
@@ -555,12 +553,6 @@ export default function CalendarGrid({
                 {snapTimeToQuarter(shiftTime(ot.holidayWorkEnd!, ho))}
               </Text>
             );
-          } else if (!compactSchedule && isLeave && shift) {
-            if (lCase === 12) {
-              lateContent = leaveTimeRow(leaveEnd!, "late");
-            } else if (lCase === 11) {
-              lateContent = leaveTimeRow(leaveStart!, "late");
-            }
           } else if (!compactSchedule && inCurrentMonth && isWork && ot) {
             const lateHours = ot.lateHours ?? 0;
             const lateClass = ot.lateClassHours ?? 0;
@@ -570,7 +562,11 @@ export default function CalendarGrid({
             } else if (lateClass > 0) {
               lateSlotBg = shiftExtensionBackground(shift);
               lateContent = classTimeRow(shiftTime(shift!.endTime, lateClass + ho), shiftToneColor!, "late");
+            } else if (isLeave && shift && (lCase === 12 || lCase === 11)) {
+              lateContent = leaveTimeRow(lCase === 12 ? leaveEnd! : leaveStart!, "late");
             }
+          } else if (!compactSchedule && isLeave && shift && (lCase === 12 || lCase === 11)) {
+            lateContent = leaveTimeRow(lCase === 12 ? leaveEnd! : leaveStart!, "late");
           }
 
           const hasEarlyExt = !!earlySlotBg;
@@ -612,6 +608,7 @@ export default function CalendarGrid({
                 interactive && pressed && styles.cellPressed,
                 compactSchedule && styles.cellCompactClip,
                 isToday && !compactSchedule && styles.cellToday,
+                ot?.disasterStop && styles.cellDisasterOnTop,
               ]}
             >
               {isToday && !compactSchedule ? <TodayCellBreathingBorder /> : null}
@@ -767,6 +764,13 @@ export default function CalendarGrid({
                 </View>
               </>
               )}
+              {ot?.disasterStop ? (
+                <View style={styles.disasterMarkWrap} pointerEvents="none">
+                  <Text style={styles.disasterMark} allowFontScaling={false}>
+                    {"\u{1F300}"}
+                  </Text>
+                </View>
+              ) : null}
             </Pressable>
             );
           })}
@@ -933,6 +937,20 @@ const styles = StyleSheet.create({
   },
   cellToday: {
     zIndex: 2,
+  },
+  cellDisasterOnTop: {
+    zIndex: 50,
+  },
+  disasterMarkWrap: {
+    position: "absolute",
+    left: -4,
+    top: 5,
+    zIndex: 100,
+    elevation: 100,
+  },
+  disasterMark: {
+    fontSize: 16,
+    lineHeight: 20,
   },
   todayCellBreathFrame: {
     position: "absolute",

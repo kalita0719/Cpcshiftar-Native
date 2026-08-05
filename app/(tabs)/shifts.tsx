@@ -5,6 +5,7 @@ import ScreenLayout from "@/src/components/ScreenLayout";
 import TemplateSettingsModal from "@/src/components/TemplateSettingsModal";
 import { colors } from "@/src/components/theme";
 import { formatYMD } from "@/src/logic/dates";
+import { Settings2 } from "lucide-react-native";
 import React, { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -28,8 +29,9 @@ export default function ScheduleHubScreen() {
     <ScreenLayout>
       <View style={styles.head}>
         <Text style={styles.h1}>排班中心</Text>
-        <Pressable onPress={() => setSettingsOpen(true)} style={styles.settingsBtn} hitSlop={8}>
-          <Text style={styles.settingsBtnText}>班次設定</Text>
+        <Pressable onPress={() => setSettingsOpen(true)} style={styles.gear} hitSlop={8}>
+          <Settings2 size={13} color={colors.teal} />
+          <Text style={styles.gearText}>班次設定</Text>
         </Pressable>
       </View>
 
@@ -70,14 +72,23 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   h1: { fontSize: 20, fontWeight: "800", color: colors.text },
-  settingsBtn: {
-    paddingHorizontal: 12,
+  gear: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 8,
     paddingVertical: 8,
-    borderRadius: 30,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.greyBg,
+    borderColor: colors.teal,
+    backgroundColor: colors.card,
   },
-  settingsBtnText: { fontSize: 13, fontWeight: "700", color: colors.text },
+  gearText: {
+    fontSize: 12,
+    lineHeight: 12,
+    fontWeight: "700",
+    color: colors.teal,
+    includeFontPadding: false,
+  },
   cardPad: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 16 },
 });

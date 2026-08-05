@@ -2,7 +2,7 @@ import { Card } from "@/src/components/Card";
 import SettingsModal from "@/src/components/SettingsModal";
 import { colors } from "@/src/components/theme";
 import { addDays, formatYMD } from "@/src/logic/dates";
-import { computeDifferentialOvertime } from "@/src/logic/differentialHours";
+import { summarizePlannedDifferential } from "@/src/logic/differentialHours";
 import { recordedOvertimeHours } from "@/src/logic/holidayOvertime";
 import { hourlyRateFromBaseSalary } from "@/src/logic/overtimePay";
 import { getDisplayShiftTimes, getScheduleChangeLabels } from "@/src/logic/shiftAllowance";
@@ -16,7 +16,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 const DAY_ZH = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
 
 export default function HomeScreen() {
-  const { overtime, shifts, settings } = useAppData();
+  const { overtime, shifts, settings, plannedDifferentialEntries } = useAppData();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const startDay = Math.min(28, Math.max(1, parseInt(settings.startDay, 10) || 1));
@@ -54,20 +54,26 @@ export default function HomeScreen() {
 
   const differentialToDate = useMemo(
     () =>
-      computeDifferentialOvertime(
-        shifts,
+      summarizePlannedDifferential(
+        plannedDifferentialEntries,
         period.from,
         effectiveTo,
         differentialEnabled,
         hourlyRate,
       ),
-    [shifts, period.from, effectiveTo, differentialEnabled, hourlyRate],
+    [plannedDifferentialEntries, period.from, effectiveTo, differentialEnabled, hourlyRate],
   );
 
   const differentialPeriod = useMemo(
     () =>
-      computeDifferentialOvertime(shifts, period.from, period.to, differentialEnabled, hourlyRate),
-    [shifts, period.from, period.to, differentialEnabled, hourlyRate],
+      summarizePlannedDifferential(
+        plannedDifferentialEntries,
+        period.from,
+        period.to,
+        differentialEnabled,
+        hourlyRate,
+      ),
+    [plannedDifferentialEntries, period.from, period.to, differentialEnabled, hourlyRate],
   );
 
   const otToDate = calendarToDate + differentialToDate.totalHours;

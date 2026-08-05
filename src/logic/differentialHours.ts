@@ -15,6 +15,12 @@ export function startOfWeekSunday(d: Date): Date {
   return addDays(new Date(d.getFullYear(), d.getMonth(), d.getDate()), -day);
 }
 
+/** 快速排班時寫入的差額工時規劃（週六日期 + 當下休假天數）。 */
+export type PlannedDifferentialEntry = {
+  date: string;
+  restDaysInWeek: number;
+};
+
 export type DifferentialOtRow = {
   date: string;
   hours: number;
@@ -33,18 +39,8 @@ export type DifferentialOtSummary = {
   b266: number;
 };
 
-/**
- * 週日～週六為一週；該週休假日（班別屬性為休假）少於 2 天時，
- * 若週六落在薪資期間內，給予 8 小時差額工時（依一般加班費累進計算）。
- */
-export function computeDifferentialOvertime(
-  shifts: ShiftItem[],
-  periodFrom: string,
-  periodTo: string,
-  enabled: boolean,
-  hourlyRate: number,
-): DifferentialOtSummary {
-  const empty: DifferentialOtSummary = {
+function emptySummary(): DifferentialOtSummary {
+  return {
     rows: [],
     totalHours: 0,
     totalPay: 0,
@@ -52,18 +48,56 @@ export function computeDifferentialOvertime(
     b166: 0,
     b266: 0,
   };
-  if (!enabled) return empty;
+}
+
+function rowFromRestDays(date: string, restDaysInWeek: number): DifferentialOtRow {
+  const { b133, b166, b266 } = brackets(DIFFERENTIAL_HOURS_PER_WEEK);
+  return {
+    date,
+    hours: DIFFERENTIAL_HOURS_PER_WEEK,
+    restDaysInWeek,
+    b133,
+    b166,
+    b266,
+  };
+}
+
+function summarizeRows(rows: DifferentialOtRow[], hourlyRate: number): DifferentialOtSummary {
+  const b133 = rows.reduce((s, r) => s + r.b133, 0);
+  const b166 = rows.reduce((s, r) => s + r.b166, 0);
+  const b266 = rows.reduce((s, r) => s + r.b266, 0);
+  return {
+    rows,
+    totalHours: rows.reduce((s, r) => s + r.hours, 0),
+    totalPay: bracketOvertimePay(hourlyRate, { b133, b166, b266 }),
+    b133,
+    b166,
+    b266,
+  };
+}
+
+/**
+ * 依班表規劃差額工時：週日～週六休假日少於 2 天時，該週週六給予 8 小時。
+ * 僅在快速排班寫入／覆蓋時呼叫；手動改班不應重算。
+ */
+export function planDifferentialEntriesFromShifts(
+  shifts: ShiftItem[],
+  rangeFrom: string,
+  rangeTo: string,
+): PlannedDifferentialEntry[] {
+  if (rangeFrom > rangeTo) return [];
 
   const shiftByDate = new Map<string, ShiftItem>();
   for (const s of shifts) shiftByDate.set(s.date, s);
 
-  const from = parseYMD(periodFrom);
-  const to = parseYMD(periodTo);
-  const rows: DifferentialOtRow[] = [];
+  const from = parseYMD(rangeFrom);
+  const to = parseYMD(rangeTo);
+  const entries: PlannedDifferentialEntry[] = [];
 
   for (let weekStart = startOfWeekSunday(from); weekStart <= to; weekStart = addDays(weekStart, 7)) {
     const saturday = addDays(weekStart, 6);
-    if (saturday < from || saturday > to) continue;
+    const saturdayYmd = formatYMD(saturday);
+    if (saturdayYmd < rangeFrom || saturdayYmd > rangeTo) continue;
 
     let restDaysInWeek = 0;
     for (let i = 0; i < 7; i++) {
@@ -72,29 +106,64 @@ export function computeDifferentialOvertime(
     }
 
     if (restDaysInWeek >= 2) continue;
-
-    const { b133, b166, b266 } = brackets(DIFFERENTIAL_HOURS_PER_WEEK);
-    rows.push({
-      date: formatYMD(saturday),
-      hours: DIFFERENTIAL_HOURS_PER_WEEK,
-      restDaysInWeek,
-      b133,
-      b166,
-      b266,
-    });
+    entries.push({ date: saturdayYmd, restDaysInWeek });
   }
 
-  const b133 = rows.reduce((s, r) => s + r.b133, 0);
-  const b166 = rows.reduce((s, r) => s + r.b166, 0);
-  const b266 = rows.reduce((s, r) => s + r.b266, 0);
-  const totalPay = bracketOvertimePay(hourlyRate, { b133, b166, b266 });
+  return entries;
+}
 
-  return {
-    rows,
-    totalHours: rows.reduce((s, r) => s + r.hours, 0),
-    totalPay,
-    b133,
-    b166,
-    b266,
-  };
+/**
+ * 快速排班覆蓋 [coveredFrom, coveredTo] 後，重算與該區間相交的週，並合併進既有規劃。
+ * 未相交的週保留原規劃（不受手動改班影響）。
+ */
+export function mergePlannedDifferentialEntries(
+  previous: PlannedDifferentialEntry[],
+  shiftsAfterBulk: ShiftItem[],
+  coveredFrom: string,
+  coveredTo: string,
+): PlannedDifferentialEntry[] {
+  if (coveredFrom > coveredTo) return previous;
+
+  const coveredFromD = parseYMD(coveredFrom);
+  const coveredToD = parseYMD(coveredTo);
+  const touchWeekStarts = new Set<string>();
+
+  for (let weekStart = startOfWeekSunday(coveredFromD); ; weekStart = addDays(weekStart, 7)) {
+    const saturday = addDays(weekStart, 6);
+    if (weekStart > coveredToD) break;
+    if (saturday < coveredFromD) continue;
+    touchWeekStarts.add(formatYMD(weekStart));
+  }
+
+  const kept = previous.filter((e) => {
+    const sat = parseYMD(e.date);
+    const weekStart = startOfWeekSunday(sat);
+    return !touchWeekStarts.has(formatYMD(weekStart));
+  });
+
+  const touchFrom = formatYMD(startOfWeekSunday(coveredFromD));
+  const touchTo = formatYMD(addDays(startOfWeekSunday(coveredToD), 6));
+  const recomputed = planDifferentialEntriesFromShifts(shiftsAfterBulk, touchFrom, touchTo);
+
+  return [...kept, ...recomputed].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * 依已規劃的差額工時（非即時班表）彙總薪資期間內金額。
+ */
+export function summarizePlannedDifferential(
+  planned: PlannedDifferentialEntry[],
+  periodFrom: string,
+  periodTo: string,
+  enabled: boolean,
+  hourlyRate: number,
+): DifferentialOtSummary {
+  if (!enabled) return emptySummary();
+
+  const rows = planned
+    .filter((e) => e.date >= periodFrom && e.date <= periodTo)
+    .map((e) => rowFromRestDays(e.date, e.restDaysInWeek))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  return summarizeRows(rows, hourlyRate);
 }

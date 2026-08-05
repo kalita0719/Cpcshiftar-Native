@@ -27,7 +27,6 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
   const [color, setColor] = useState(SHIFT_PRESET_COLORS[0]);
   const [startTime, setStartTime] = useState("07:00");
   const [endTime, setEndTime] = useState("15:00");
-  const [notes, setNotes] = useState("");
 
   const leaveEdit = editTemplate?.systemTag === "休假";
 
@@ -43,22 +42,20 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
         setStartTime(snapTimeToQuarter(editTemplate.startTime ?? "09:00"));
         setEndTime(snapTimeToQuarter(editTemplate.endTime ?? "17:00"));
       }
-      setNotes(editTemplate.notes ?? "");
     } else {
       setName("");
       setColor(SHIFT_PRESET_COLORS[0]);
       setStartTime("09:00");
       setEndTime("17:00");
-      setNotes("");
     }
   }, [editTemplate, visible]);
 
   const submit = () => {
     if (editTemplate) {
       if (editTemplate.systemTag === "休假") {
-        updateTemplate(editTemplate.id, { name, color, startTime: null, endTime: null, notes: notes || null });
+        updateTemplate(editTemplate.id, { name, color, startTime: null, endTime: null });
       } else {
-        updateTemplate(editTemplate.id, { name, color, startTime, endTime, notes: notes || null });
+        updateTemplate(editTemplate.id, { name, color, startTime, endTime });
       }
     } else {
       createTemplate({
@@ -66,7 +63,6 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
         color,
         startTime,
         endTime,
-        notes: notes || null,
         isFixed: false,
       });
     }
@@ -133,13 +129,6 @@ export default function TemplateFormModal({ visible, onClose, editTemplate }: Pr
                 </View>
               </View>
             ) : null}
-            <Text style={styles.label}>備註（選填）</Text>
-            <TextInput
-              value={notes}
-              onChangeText={setNotes}
-              style={styles.input}
-              placeholderTextColor={colors.muted}
-            />
             <Pressable onPress={submit} style={styles.submit}>
               <Text style={styles.submitText}>儲存</Text>
             </Pressable>

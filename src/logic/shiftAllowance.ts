@@ -111,8 +111,8 @@ function parseDateTimeMs(date: string, time: string): number {
 
 /**
  * 有效上下班 → 絕對時間。
- * 晚班開始、清晨結束（如 23:00–07:00）：上班在班表日傍晚，下班在隔日清晨；
- * 清晨下班在隔日（如 2/6 23:00–2/7 07:00）；夜班津貼歸屬於班表日（2/6）。
+ * 班表日 = 早上下班日：跨日班（如 23:00–08:00）為前一日傍晚開工、班表日清晨結束
+ *（例：7/2 夜班 → 7/1 23:00～7/2 08:00）。
  */
 function resolveWorkAbsoluteSpan(
   shiftDate: string,
@@ -121,18 +121,44 @@ function resolveWorkAbsoluteSpan(
 ): AbsoluteRange {
   const startMin = timeToMin(effectiveStart);
   const endMin = timeToMin(effectiveEnd);
-  let startMs = parseDateTimeMs(shiftDate, effectiveStart);
-  let endMs = parseDateTimeMs(shiftDate, effectiveEnd);
-  if (endMs <= startMs) endMs += DAY * 60 * 1000;
-
-  const eveningStartMorningEnd =
-    startMin >= 17 * 60 && endMin <= NIGHT_TODAY_END && endMs - startMs < DAY * 60 * 1000;
-  if (eveningStartMorningEnd) {
-    startMs = parseDateTimeMs(shiftDate, effectiveStart);
-    const morningEndDay = formatYMD(addDays(parseYMD(shiftDate), 1));
-    endMs = parseDateTimeMs(morningEndDay, effectiveEnd);
+  if (endMin <= startMin) {
+    const prev = formatYMD(addDays(parseYMD(shiftDate), -1));
+    return {
+      startMs: parseDateTimeMs(prev, effectiveStart),
+      endMs: parseDateTimeMs(shiftDate, effectiveEnd),
+    };
   }
-  return { startMs, endMs };
+  return {
+    startMs: parseDateTimeMs(shiftDate, effectiveStart),
+    endMs: parseDateTimeMs(shiftDate, effectiveEnd),
+  };
+}
+
+function calendarYmdFromMs(ms: number): string {
+  const d = new Date(ms);
+  return formatYMD(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+}
+
+/** 夜班津貼歸屬日：實際開始上班的日曆日（跨日夜班為前一日）。 */
+function resolveNightAllowanceDate(
+  shift: ShiftAllowanceShift,
+  workRanges: AbsoluteRange[],
+): string {
+  if (workRanges.length > 0) {
+    const startMs = Math.min(...workRanges.map((r) => r.startMs));
+    return calendarYmdFromMs(startMs);
+  }
+  const effective = resolveEffectiveShiftTimes(
+    shift,
+    shift.overtime,
+    shift.handoverEnabled,
+    shift.leaveStart,
+    shift.leaveEnd,
+  );
+  if (timeToMin(effective.endTime) <= timeToMin(effective.startTime)) {
+    return prevDateStr(shift.date);
+  }
+  return shift.date;
 }
 
 /** 請假後實際上班區段 → 絕對時間（與 workSegmentsAfterLeave 座標一致） */
@@ -255,9 +281,10 @@ export function resolveEffectiveShiftTimes(
 
   if (handoverEnabled && ho > 0 && leaveStart && leaveEnd) {
     const lc = leaveCase(shift.startTime, shift.endTime, leaveStart, leaveEnd);
-    if (lc === 10) endTime = shiftTime(endTime, ho);
-    else if (lc === 11) startTime = shiftTime(startTime, -ho);
-    else if (lc === 12) endTime = shiftTime(endTime, ho);
+    // 該側已有加班／上課時，交接班已併入 earlyH/lateH，勿再加一次
+    if (lc === 10 && lateH === 0) endTime = shiftTime(endTime, ho);
+    else if (lc === 11 && earlyH === 0) startTime = shiftTime(startTime, -ho);
+    else if (lc === 12 && lateH === 0) endTime = shiftTime(endTime, ho);
   }
   return { startTime, endTime };
 }
@@ -295,17 +322,16 @@ export function getDisplayShiftTimes(
   }
 
   const hasLeave = !!(ot?.leaveStart && ot?.leaveEnd);
-  const otInput: ShiftAllowanceOvertime | null =
-    ot && !hasLeave
-      ? {
-          earlyHours: ot.earlyHours,
-          lateHours: ot.lateHours,
-          earlyClassHours: ot.earlyClassHours,
-          lateClassHours: ot.lateClassHours,
-        }
-      : null;
-  const earlyH = hasLeave ? 0 : (ot?.earlyHours ?? 0) + (ot?.earlyClassHours ?? 0);
-  const lateH = hasLeave ? 0 : (ot?.lateHours ?? 0) + (ot?.lateClassHours ?? 0);
+  const otInput: ShiftAllowanceOvertime | null = ot
+    ? {
+        earlyHours: ot.earlyHours,
+        lateHours: ot.lateHours,
+        earlyClassHours: ot.earlyClassHours,
+        lateClassHours: ot.lateClassHours,
+      }
+    : null;
+  const earlyH = (ot?.earlyHours ?? 0) + (ot?.earlyClassHours ?? 0);
+  const lateH = (ot?.lateHours ?? 0) + (ot?.lateClassHours ?? 0);
 
   let { startTime, endTime } = resolveEffectiveShiftTimes(
     shift,
@@ -341,10 +367,9 @@ export function getScheduleChangeLabels(
 
   if (ot.leaveStart && ot.leaveEnd) {
     labels.push("（請假）");
-  } else {
-    if ((ot.earlyHours ?? 0) > 0 || (ot.lateHours ?? 0) > 0) labels.push("（加班）");
-    if ((ot.earlyClassHours ?? 0) > 0 || (ot.lateClassHours ?? 0) > 0) labels.push("（上課）");
   }
+  if ((ot.earlyHours ?? 0) > 0 || (ot.lateHours ?? 0) > 0) labels.push("（加班）");
+  if ((ot.earlyClassHours ?? 0) > 0 || (ot.lateClassHours ?? 0) > 0) labels.push("（上課）");
 
   return labels.join("");
 }
@@ -465,7 +490,7 @@ function prevDateStr(date: string): string {
 }
 
 /**
- * 帶前一日班次上下文，避免跨日夜班在隔日清晨重複計入夜班津貼。
+ * 帶前一日班次上下文，避免相鄰班次重複計入夜班津貼。
  */
 function workSegmentsForAllowanceShift(shift: ShiftAllowanceShift): MinuteSegment[] {
   const effective = resolveEffectiveShiftTimes(
@@ -534,8 +559,8 @@ function buildAllowanceRowsForShift(
     flags.hasNightAllowance || qualifiesNightFromAbsoluteRanges(workRanges, shift.date);
 
   const midDate = hasMid ? resolveMiddleAllowanceDate(shift.date, workRanges) : null;
-  /** 夜班津貼歸屬班表日（例：2/6、2/7 夜班 → 津貼記在 2/6、2/7） */
-  let nightDate = hasNight ? shift.date : null;
+  /** 夜班津貼歸屬開始上班日（例：7/2 夜班 23:00–08:00 → 津貼記在 7/1） */
+  let nightDate = hasNight ? resolveNightAllowanceDate(shift, workRanges) : null;
   if (
     nightDate &&
     previousDayShift &&
@@ -594,7 +619,7 @@ export function allowanceAmountsForShift(
   };
 }
 
-/** 一期津貼明細與合計（依新時間規則；夜班津貼依實際日曆日顯示） */
+/** 一期津貼明細與合計（夜班津貼歸屬實際開始上班日） */
 export function buildPeriodAllowanceBreakdown(
   shifts: ShiftAllowanceShift[],
   rates: AllowanceRates,

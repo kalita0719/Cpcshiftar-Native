@@ -1,16 +1,14 @@
 import { Card } from "@/src/components/Card";
 import { colors } from "@/src/components/theme";
-import { isRestDayShift } from "@/src/logic/differentialHours";
-import { computeDifferentialOvertime } from "@/src/logic/differentialHours";
+import { isRestDayShift, summarizePlannedDifferential } from "@/src/logic/differentialHours";
 import {
   buildHolidayAllowanceShift,
   hasHolidayWork,
-  hasWorkdayLeave,
   holidayHandoverHours,
   isAllowanceEligibleWithHoliday,
   recordedOvertimeHours,
 } from "@/src/logic/holidayOvertime";
-import { computeNationalHolidayPay } from "@/src/logic/nationalHolidayPay";
+import { computeDisasterStopPay, computeNationalHolidayPay } from "@/src/logic/nationalHolidayPay";
 import { buildPeriodAllowanceBreakdown } from "@/src/logic/shiftAllowance";
 import { formatYMD } from "@/src/logic/dates";
 import {
@@ -40,12 +38,13 @@ function formatHandoverH(h: number) {
 }
 
 export default function OvertimeScreen() {
-  const { shifts, overtime, settings } = useAppData();
+  const { shifts, overtime, settings, plannedDifferentialEntries } = useAppData();
   const [offset, setOffset] = useState(0);
   const [showHandoverDetail, setShowHandoverDetail] = useState(false);
   const [showDifferentialDetail, setShowDifferentialDetail] = useState(false);
   const [showAllowanceDetail, setShowAllowanceDetail] = useState(false);
   const [showNationalHolidayDetail, setShowNationalHolidayDetail] = useState(false);
+  const [showDisasterStopDetail, setShowDisasterStopDetail] = useState(false);
   const [showRegularOvertimeDetail, setShowRegularOvertimeDetail] = useState(false);
 
   const startDay = Math.min(28, Math.max(1, parseInt(settings.startDay, 10) || 1));
@@ -60,6 +59,7 @@ export default function OvertimeScreen() {
   const handover = settings.handoverEnabled;
   const differentialEnabled = settings.differentialHoursEnabled;
   const nationalHolidayEnabled = settings.nationalHolidayOvertimeEnabled;
+  const disasterStopEnabled = settings.disasterStopOvertimeEnabled;
 
   const overtimeData = useMemo(
     () => overtime.filter((o) => o.date >= period.from && o.date <= effectiveTo),
@@ -89,15 +89,14 @@ export default function OvertimeScreen() {
           ...s,
           leaveStart: ot?.leaveStart ?? null,
           leaveEnd: ot?.leaveEnd ?? null,
-          overtime:
-            ot && !hasWorkdayLeave(ot)
-              ? {
-                  earlyHours: ot.earlyHours,
-                  lateHours: ot.lateHours,
-                  earlyClassHours: ot.earlyClassHours,
-                  lateClassHours: ot.lateClassHours,
-                }
-              : null,
+          overtime: ot
+            ? {
+                earlyHours: ot.earlyHours,
+                lateHours: ot.lateHours,
+                earlyClassHours: ot.earlyClassHours,
+                lateClassHours: ot.lateClassHours,
+              }
+            : null,
           handoverEnabled: handover,
         },
       ];
@@ -132,16 +131,35 @@ export default function OvertimeScreen() {
 
   const differential = useMemo(
     () =>
-      computeDifferentialOvertime(shifts, period.from, effectiveTo, differentialEnabled, hourlyRate),
-    [shifts, period.from, effectiveTo, differentialEnabled, hourlyRate],
+      summarizePlannedDifferential(
+        plannedDifferentialEntries,
+        period.from,
+        effectiveTo,
+        differentialEnabled,
+        hourlyRate,
+      ),
+    [plannedDifferentialEntries, period.from, effectiveTo, differentialEnabled, hourlyRate],
   );
 
   const nationalHoliday = useMemo(
     () =>
       nationalHolidayEnabled
-        ? computeNationalHolidayPay(periodShifts, overtimeByDate, hourlyRate)
+        ? computeNationalHolidayPay(
+            periodShifts,
+            overtimeByDate,
+            hourlyRate,
+            disasterStopEnabled,
+          )
         : { rows: [], totalHours: 0, totalPay: 0 },
-    [periodShifts, overtimeByDate, hourlyRate, nationalHolidayEnabled],
+    [periodShifts, overtimeByDate, hourlyRate, nationalHolidayEnabled, disasterStopEnabled],
+  );
+
+  const disasterStop = useMemo(
+    () =>
+      disasterStopEnabled
+        ? computeDisasterStopPay(periodShifts, overtimeByDate, hourlyRate)
+        : { rows: [], totalHours: 0, totalPay: 0 },
+    [periodShifts, overtimeByDate, hourlyRate, disasterStopEnabled],
   );
 
   const regularOvertime = useMemo(() => {
@@ -187,24 +205,28 @@ export default function OvertimeScreen() {
     differential.totalPay +
     (handover ? handoverPay : 0) +
     nationalHoliday.totalPay +
+    disasterStop.totalPay +
     allowancePay;
   const hasAllowanceRows = allowanceBreakdown.rows.length > 0;
   const overtimeDetailHours =
     regularOvertime.totalHours +
     differential.totalHours +
     nationalHoliday.totalHours +
+    disasterStop.totalHours +
     (handover ? handoverTotalH : 0);
   const overtimeDetailPay =
     regularOvertime.totalPay +
     differential.totalPay +
     nationalHoliday.totalPay +
+    disasterStop.totalPay +
     (handover ? handoverPay : 0);
 
   const hasOvertimeDetail =
     regularOvertime.totalHours > 0 ||
     (handover && handoverTotalH > 0) ||
     differential.totalHours > 0 ||
-    nationalHoliday.totalHours > 0;
+    nationalHoliday.totalHours > 0 ||
+    disasterStop.totalHours > 0;
   const hasData = hasOvertimeDetail || hasAllowanceRows;
 
   return (
@@ -335,6 +357,32 @@ export default function OvertimeScreen() {
                   <View style={styles.detailList}>
                     {nationalHoliday.rows.map((r) => (
                       <View key={`${r.date}-${r.kind}`} style={styles.detailRow}>
+                        <Text style={styles.detailDate}>
+                          {shortDate(r.date)} {r.holidayName}
+                          {r.kind === "award" ? " 獎工" : ""}
+                          {r.kind === "national" && r.isRestDay
+                            ? "（休假日 8h）"
+                            : `（${r.hours}h）`}
+                        </Text>
+                        <Text style={styles.detailAmount}>{baseSalary > 0 ? fm(r.pay) : "—"}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
+            {disasterStop.totalHours > 0 && (
+              <View style={{ marginTop: 4 }}>
+                <SummaryLine
+                  label={`天災停班 ${disasterStop.totalHours}h`}
+                  amountText={baseSalary > 0 ? fm(disasterStop.totalPay) : "請設定底薪"}
+                  showDetail={showDisasterStopDetail}
+                  onToggleDetail={() => setShowDisasterStopDetail((v) => !v)}
+                />
+                {showDisasterStopDetail && (
+                  <View style={styles.detailList}>
+                    {disasterStop.rows.map((r) => (
+                      <View key={`${r.date}-${r.kind}-disaster`} style={styles.detailRow}>
                         <Text style={styles.detailDate}>
                           {shortDate(r.date)} {r.holidayName}
                           {r.kind === "award" ? " 獎工" : ""}

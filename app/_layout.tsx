@@ -1,4 +1,5 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from "@react-navigation/native";
+import Constants, { ExecutionEnvironment } from "expo-constants";
 import * as NavigationBar from "expo-navigation-bar";
 import { Stack } from "expo-router";
 import { StatusBar, setStatusBarStyle, setStatusBarTranslucent } from "expo-status-bar";
@@ -49,12 +50,25 @@ function RootShell() {
     }
   }, []);
 
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) return;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mobileAds = require("react-native-google-mobile-ads").default as () => {
+        initialize: () => Promise<unknown>;
+      };
+      void mobileAds().initialize();
+    } catch {
+      // 無原生模組時略過
+    }
+  }, []);
+
   return (
     <AppDataProvider>
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="modal" options={{ presentation: "modal", title: "Modal" }} />
         </Stack>
         <GestureBarBackdrop />
         <StatusBar style="dark" translucent backgroundColor="transparent" />

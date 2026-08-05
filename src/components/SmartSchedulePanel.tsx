@@ -25,9 +25,12 @@ import {
   TouchableOpacity,
   View,
   type ScrollView as ScrollViewType,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
 import Animated, {
   Easing,
+  interpolateColor,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -165,6 +168,92 @@ function HintStepDot({ n }: { n: number }) {
     <View style={styles.hintStepDot}>
       <Text style={styles.hintStepDotText}>{n}</Text>
     </View>
+  );
+}
+
+/** 與 StepBadge 同週期的呼吸外框（步驟 1 輪班／步驟 2 今日班別共用） */
+function BreathingBorder({
+  children,
+  breathing,
+  onPress,
+  style,
+  ringStyle,
+  pressedStyle,
+}: {
+  children: React.ReactNode;
+  breathing?: boolean;
+  onPress?: () => void;
+  style?: StyleProp<ViewStyle>;
+  ringStyle?: StyleProp<ViewStyle>;
+  pressedStyle?: StyleProp<ViewStyle>;
+}) {
+  const pulse = useSharedValue(0);
+  const showBreath = Boolean(breathing);
+
+  useEffect(() => {
+    if (!showBreath) {
+      pulse.value = withTiming(0, { duration: 200 });
+      return;
+    }
+    pulse.value = withRepeat(
+      withTiming(1, { duration: STEP_BADGE_BREATH_MS, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true,
+    );
+  }, [showBreath, pulse]);
+
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: showBreath ? 0.18 + pulse.value * 0.42 : 0,
+  }));
+
+  const borderStyle = useAnimatedStyle(() => {
+    if (!showBreath) return {};
+    return {
+      borderColor: interpolateColor(
+        pulse.value,
+        [0, 1],
+        ["rgba(17, 146, 143, 0.35)", "rgba(17, 146, 143, 1)"],
+      ),
+    };
+  });
+
+  const body = (pressed?: boolean) => (
+    <Animated.View style={[style, borderStyle, pressed && pressedStyle]}>
+      {showBreath ? (
+        <Animated.View style={[ringStyle, glowStyle]} pointerEvents="none" />
+      ) : null}
+      {children}
+    </Animated.View>
+  );
+
+  if (onPress) {
+    return <Pressable onPress={onPress}>{({ pressed }) => body(pressed)}</Pressable>;
+  }
+
+  return body();
+}
+
+function BreathingRuleOption({
+  children,
+  breathing,
+  onPress,
+  style,
+}: {
+  children: React.ReactNode;
+  breathing?: boolean;
+  onPress?: () => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <BreathingBorder
+      breathing={breathing}
+      onPress={onPress}
+      style={[styles.ruleOption, style]}
+      ringStyle={styles.ruleOptionBreathRing}
+      pressedStyle={styles.ruleOptionPressed}
+    >
+      {children}
+    </BreathingBorder>
   );
 }
 
@@ -473,12 +562,9 @@ export default function SmartSchedulePanel({
               ) : (
                 <View style={styles.stepBody}>
                   {PRESET_RULES.map((rule) => (
-                    <Pressable
+                    <BreathingRuleOption
                       key={rule.id}
-                      style={({ pressed }) => [
-                        styles.ruleOption,
-                        pressed && styles.ruleOptionPressed,
-                      ]}
+                      breathing
                       onPress={() => selectPresetRule(rule)}
                     >
                       <View style={styles.ruleOptionInner}>
@@ -487,12 +573,12 @@ export default function SmartSchedulePanel({
                         </Text>
                         {renderPatternPreview(rule.dna, "step1")}
                       </View>
-                    </Pressable>
+                    </BreathingRuleOption>
                   ))}
 
-                  <View
+                  <BreathingRuleOption
+                    breathing
                     style={[
-                      styles.ruleOption,
                       customDraftOpen && styles.ruleOptionActive,
                       customRotation && !customDraftOpen && styles.ruleOptionSaved,
                     ]}
@@ -544,7 +630,7 @@ export default function SmartSchedulePanel({
                         </Pressable>
                       ) : null}
                     </View>
-                  </View>
+                  </BreathingRuleOption>
 
                   {customDraftOpen ? (
                     <View style={styles.customBuilder}>
@@ -663,21 +749,23 @@ export default function SmartSchedulePanel({
                         {selectedRule.dna.map((slot, i) => {
                           const c = resolveSlot(slot);
                           return (
-                            <View key={`day-${i}`} style={styles.dayCell}>
+                            <BreathingBorder
+                              key={`day-${i}`}
+                              breathing
+                              onPress={() => selectTodaySlot(i)}
+                              style={styles.dayCellBreath}
+                              ringStyle={styles.dayCellBreathRing}
+                              pressedStyle={styles.dayCellBreathPressed}
+                            >
                               <Text style={styles.dayLabel}>第{i + 1}天</Text>
-                              <TouchableOpacity
-                                activeOpacity={0.85}
-                                style={[
-                                  styles.dayChip,
-                                  { backgroundColor: c.color, borderColor: "rgba(0,0,0,0.12)" },
-                                ]}
-                                onPress={() => selectTodaySlot(i)}
+                              <View
+                                style={[styles.dayChip, { backgroundColor: c.color }]}
                               >
                                 <Text style={[styles.dayChipText, styles.chipTextOnColor]}>
                                   {c.short}
                                 </Text>
-                              </TouchableOpacity>
-                            </View>
+                              </View>
+                            </BreathingBorder>
                           );
                         })}
                       </View>
@@ -700,19 +788,21 @@ export default function SmartSchedulePanel({
                                 }
                                 const c = resolveSlot(slot);
                                 return (
-                                  <View key={`day-${i}`} style={styles.dayCellPreset}>
+                                  <BreathingBorder
+                                    key={`day-${i}`}
+                                    breathing
+                                    onPress={() => selectTodaySlot(i)}
+                                    style={styles.dayCellBreathPreset}
+                                    ringStyle={styles.dayCellBreathRing}
+                                    pressedStyle={styles.dayCellBreathPressed}
+                                  >
                                     <Text style={styles.dayLabel}>第{i + 1}天</Text>
-                                    <TouchableOpacity
-                                      activeOpacity={0.85}
+                                    <View
                                       style={[
                                         styles.dayChip,
                                         styles.dayChipPreset,
-                                        {
-                                          backgroundColor: c.color,
-                                          borderColor: "rgba(0,0,0,0.12)",
-                                        },
+                                        { backgroundColor: c.color },
                                       ]}
-                                      onPress={() => selectTodaySlot(i)}
                                     >
                                       <Text
                                         style={[
@@ -722,8 +812,8 @@ export default function SmartSchedulePanel({
                                       >
                                         {c.short}
                                       </Text>
-                                    </TouchableOpacity>
-                                  </View>
+                                    </View>
+                                  </BreathingBorder>
                                 );
                               })}
                             </View>
@@ -933,6 +1023,12 @@ const styles = StyleSheet.create({
     marginBottom: 5,
     backgroundColor: "#fafbfc",
   },
+  ruleOptionBreathRing: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.teal,
+  },
   ruleOptionPressed: { backgroundColor: "#f0fdfa", borderColor: colors.teal },
   ruleOptionActive: { borderColor: colors.teal, backgroundColor: "#f0fdfa" },
   ruleOptionSaved: { borderColor: colors.teal },
@@ -1097,12 +1193,35 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 6,
   },
-  dayCell: { width: "20%", alignItems: "center", minWidth: 52 },
-  dayCellPreset: {
+  dayCellBreath: {
+    width: "20%",
+    minWidth: 52,
+    alignItems: "center",
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#fafbfc",
+  },
+  dayCellBreathPreset: {
     flex: 1,
     minWidth: 0,
     alignItems: "center",
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#fafbfc",
   },
+  dayCellBreathRing: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.teal,
+  },
+  dayCellBreathPressed: { backgroundColor: "#f0fdfa", borderColor: colors.teal },
   dayCellPresetSpacer: { flex: 1, minWidth: 0 },
   dayLabel: { fontSize: 10, color: colors.muted, marginBottom: 4, fontWeight: "600" },
   dayChip: {
@@ -1111,6 +1230,7 @@ const styles = StyleSheet.create({
     maxWidth: 44,
     borderRadius: 8,
     borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.12)",
     alignItems: "center",
     justifyContent: "center",
   },

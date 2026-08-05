@@ -1,22 +1,44 @@
 import { colors } from "@/src/components/theme";
+import Constants, { ExecutionEnvironment } from "expo-constants";
 import React from "react";
-import { StyleSheet, View, type ViewStyle } from "react-native";
+import { Platform, StyleSheet, View, type ViewStyle } from "react-native";
 
-/** 預留給未來橫幅廣告的固定高度（px） */
+/** 頂部廣告欄位預設高度（載入前／失敗時） */
 export const AD_BANNER_HEIGHT = 70;
+
+const canShowNativeAds =
+  Platform.OS !== "web" &&
+  Constants.executionEnvironment !== ExecutionEnvironment.StoreClient;
 
 type Props = {
   style?: ViewStyle;
 };
 
-/** 頂部廣告欄位佔位；之後可替換為實際 AdMob / 聯播元件 */
+/** 頂部錨定自動調整橫幅；Expo Go 僅顯示佔位 */
 export default function AdBannerSlot({ style }: Props) {
-  return <View style={[styles.slot, style]} pointerEvents="none" accessibilityElementsHidden />;
+  if (!canShowNativeAds) {
+    return (
+      <View
+        style={[styles.slot, { height: AD_BANNER_HEIGHT }, style]}
+        pointerEvents="none"
+        accessibilityElementsHidden
+      />
+    );
+  }
+
+  // 延遲載入，避免 Expo Go 因缺少原生模組而崩潰
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const NativeAdBanner = require("./AdBannerNative").default as React.ComponentType<Props>;
+  return <NativeAdBanner style={style} />;
 }
 
 const styles = StyleSheet.create({
   slot: {
-    height: AD_BANNER_HEIGHT,
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    backgroundColor: colors.card,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },

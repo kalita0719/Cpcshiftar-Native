@@ -18,7 +18,7 @@ type Props = {
   onClose: () => void;
 };
 
-type HelpKey = "handover" | "differential" | "nationalHoliday";
+type HelpKey = "handover" | "differential" | "nationalHoliday" | "disasterStop";
 
 const TOGGLE_HELP: Record<HelpKey, { title: string; body: string }> = {
   handover: {
@@ -27,11 +27,15 @@ const TOGGLE_HELP: Record<HelpKey, { title: string; body: string }> = {
   },
   differential: {
     title: "啟用差額工時",
-    body: "每週日～週六計算休假日次數（班別為休假）；少於 2 日者，該週週六給予 8 小時差額工時，依一般加班費計算並列入統計",
+    body: "快速排班時依當下班表規劃：每週日～週六休假少於 2 日者，該週週六給予 8 小時差額工時；手動改班不重算，再次快速排班覆蓋時才重算",
   },
   nationalHoliday: {
     title: "啟用國定假日加班",
-    body: "開啟後，加班費頁面才會計算國定假日額外加班費與獎工",
+    body: "開啟後，加班費頁面才會計算國定假日額外加班費",
+  },
+  disasterStop: {
+    title: "啟用天然災害停班加班",
+    body: "開啟後，在加班／請假紀錄標記「天災停班」的日期，依國定假日規則計算加班費",
   },
 };
 
@@ -110,6 +114,9 @@ export default function SettingsModal({ visible, onClose }: Props) {
   const [nationalHolidayOvertime, setNationalHolidayOvertime] = useState(
     settings.nationalHolidayOvertimeEnabled,
   );
+  const [disasterStopOvertime, setDisasterStopOvertime] = useState(
+    settings.disasterStopOvertimeEnabled,
+  );
   const [mid, setMid] = useState(settings.midAllowance);
   const [night, setNight] = useState(settings.nightAllowance);
   const [helpKey, setHelpKey] = useState<HelpKey | null>(null);
@@ -121,6 +128,7 @@ export default function SettingsModal({ visible, onClose }: Props) {
     setHandover(settings.handoverEnabled);
     setDifferentialHours(settings.differentialHoursEnabled);
     setNationalHolidayOvertime(settings.nationalHolidayOvertimeEnabled);
+    setDisasterStopOvertime(settings.disasterStopOvertimeEnabled);
     setMid(settings.midAllowance);
     setNight(settings.nightAllowance);
     setHelpKey(null);
@@ -136,6 +144,7 @@ export default function SettingsModal({ visible, onClose }: Props) {
       handoverEnabled: handover,
       differentialHoursEnabled: differentialHours,
       nationalHolidayOvertimeEnabled: nationalHolidayOvertime,
+      disasterStopOvertimeEnabled: disasterStopOvertime,
       midAllowance: mid,
       nightAllowance: night,
     });
@@ -183,14 +192,14 @@ export default function SettingsModal({ visible, onClose }: Props) {
               </View>
 
               <SettingToggleRow
-                title="啟用交接班"
+                title="交接班加班費計算"
                 helpKey="handover"
                 value={handover}
                 onChange={setHandover}
                 onShowHelp={setHelpKey}
               />
               <SettingToggleRow
-                title="啟用差額工時"
+                title="差額工時加班費計算"
                 helpKey="differential"
                 value={differentialHours}
                 onChange={setDifferentialHours}
@@ -198,10 +207,18 @@ export default function SettingsModal({ visible, onClose }: Props) {
                 stacked
               />
               <SettingToggleRow
-                title="啟用國定假日加班"
+                title="國定假日加班費計算"
                 helpKey="nationalHoliday"
                 value={nationalHolidayOvertime}
                 onChange={setNationalHolidayOvertime}
+                onShowHelp={setHelpKey}
+                stacked
+              />
+              <SettingToggleRow
+                title="天災停班加班費計算"
+                helpKey="disasterStop"
+                value={disasterStopOvertime}
+                onChange={setDisasterStopOvertime}
                 onShowHelp={setHelpKey}
                 stacked
               />

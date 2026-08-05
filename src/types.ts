@@ -52,6 +52,8 @@ export type Overtime = {
   /** 休假日上班時段（僅班別為休假時使用） */
   holidayWorkStart?: string | null;
   holidayWorkEnd?: string | null;
+  /** 天然災害停班：當日套用 PREMIUM 國定假日計費規則。 */
+  disasterStop?: boolean;
   notes?: string | null;
   createdAt: string;
 };
@@ -71,10 +73,12 @@ export type AppSettings = {
   baseSalary: string;
   startDay: string;
   handoverEnabled: boolean;
-  /** 週休少於 2 日時，於該週週六給予 8h 差額工時（依一般加班費計算）。 */
+  /** 週休少於 2 日時，於該週週六給予 8h 差額工時（快速排班時規劃，手動改班不重算）。 */
   differentialHoursEnabled: boolean;
   /** 啟用國定假日額外加班費（2×／獎工）計算。 */
   nationalHolidayOvertimeEnabled: boolean;
+  /** 啟用天然災害停班日之 PREMIUM 加班費計算（與國定假日開關互不連動）。 */
+  disasterStopOvertimeEnabled: boolean;
   midAllowance: string;
   nightAllowance: string;
   nextShiftId: number;

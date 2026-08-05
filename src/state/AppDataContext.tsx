@@ -2,6 +2,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { clampOvertimeNote } from "@/src/constants/overtimeNotes";
 import { formatYMD } from "@/src/logic/dates";
+import {
+  mergePlannedDifferentialEntries,
+  planDifferentialEntriesFromShifts,
+  type PlannedDifferentialEntry,
+} from "@/src/logic/differentialHours";
 import { type GeneratedShiftRow } from "@/src/logic/shiftLogic";
 import {
   applyTemplateAppearanceToShifts,
@@ -32,6 +37,7 @@ const defaultSettings = (): AppSettings => ({
   handoverEnabled: true,
   differentialHoursEnabled: false,
   nationalHolidayOvertimeEnabled: false,
+  disasterStopOvertimeEnabled: false,
   midAllowance: "200",
   nightAllowance: "450",
   nextShiftId: 1,
@@ -232,22 +238,13 @@ type PersistShape = {
   overtime: Overtime[];
   settings: AppSettings;
   customRotation?: SavedCustomRotation | null;
+  /** 快速排班時鎖定的差額工時；手動改班不重算。缺省時載入會自班表種子一次。 */
+  plannedDifferentialEntries?: PlannedDifferentialEntry[];
 };
 
-function parseSavedCustomRotation(raw: unknown): SavedCustomRotation | null {
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  if (!Array.isArray(o.dna)) return null;
-  const dna = o.dna.filter((x): x is RotationSlotCode => {
-    if (x === "M" || x === "A" || x === "N" || x === "O") return true;
-    return typeof x === "string" && /^@\d+$/.test(x) && Number(x.slice(1)) > 0;
-  });
-  const updatedAt = typeof o.updatedAt === "string" ? o.updatedAt : new Date().toISOString();
-  return { dna, updatedAt };
-}
-
-type AppDataContextValue = PersistShape & {
+type AppDataContextValue = Omit<PersistShape, "plannedDifferentialEntries" | "customRotation"> & {
   customRotation: SavedCustomRotation | null;
+  plannedDifferentialEntries: PlannedDifferentialEntry[];
   ready: boolean;
   saveCustomRotation: (dna: RotationSlotCode[]) => void;
   upsertShiftForDate: (row: Omit<ShiftItem, "id" | "createdAt"> & { id?: number }) => void;
@@ -267,6 +264,7 @@ type AppDataContextValue = PersistShape & {
     leaveEnd?: string | null;
     holidayWorkStart?: string | null;
     holidayWorkEnd?: string | null;
+    disasterStop?: boolean;
     notes?: string;
   }) => void;
   deleteOvertimeByDate: (date: string) => void;
@@ -274,6 +272,63 @@ type AppDataContextValue = PersistShape & {
   getShiftsInRange: (from: string, to: string) => ShiftItem[];
   getWeeklyShifts: (weekStartYmd: string) => ShiftItem[];
 };
+
+function parsePlannedDifferentialEntries(raw: unknown): PlannedDifferentialEntry[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) return [];
+  const out: PlannedDifferentialEntry[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.date !== "string") continue;
+    const rest =
+      typeof o.restDaysInWeek === "number" && Number.isFinite(o.restDaysInWeek)
+        ? Math.max(0, Math.floor(o.restDaysInWeek))
+        : 0;
+    out.push({ date: o.date, restDaysInWeek: rest });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function seedPlannedDifferentialFromShifts(shifts: ShiftItem[]): PlannedDifferentialEntry[] {
+  if (shifts.length === 0) return [];
+  const dates = shifts.map((s) => s.date).sort();
+  return planDifferentialEntriesFromShifts(shifts, dates[0]!, dates[dates.length - 1]!);
+}
+
+function applyBulkShiftRows(prev: ShiftItem[], rows: GeneratedShiftRow[]): ShiftItem[] {
+  const map = new Map(prev.map((s) => [s.date, s]));
+  let nid = nextId(prev);
+  for (const r of rows) {
+    const existing = map.get(r.date);
+    const id = existing?.id ?? nid;
+    if (!existing) nid += 1;
+    map.set(r.date, {
+      id,
+      name: r.name,
+      color: r.color,
+      startTime: r.startTime,
+      endTime: r.endTime,
+      date: r.date,
+      notes: r.notes ?? null,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      systemTag: r.systemTag,
+    });
+  }
+  return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function parseSavedCustomRotation(raw: unknown): SavedCustomRotation | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (!Array.isArray(o.dna)) return null;
+  const dna = o.dna.filter((x): x is RotationSlotCode => {
+    if (x === "M" || x === "A" || x === "N" || x === "O") return true;
+    return typeof x === "string" && /^@\d+$/.test(x) && Number(x.slice(1)) > 0;
+  });
+  const updatedAt = typeof o.updatedAt === "string" ? o.updatedAt : new Date().toISOString();
+  return { dna, updatedAt };
+}
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
 
@@ -284,6 +339,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [overtime, setOvertime] = useState<Overtime[]>([]);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [customRotation, setCustomRotation] = useState<SavedCustomRotation | null>(null);
+  const [plannedDifferentialEntries, setPlannedDifferentialEntries] = useState<
+    PlannedDifferentialEntry[]
+  >([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -311,17 +369,25 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
             setOvertime(Array.isArray(p.overtime) ? p.overtime : []);
             setSettings(mergedSettings);
             setCustomRotation(parseSavedCustomRotation(p.customRotation));
+            const parsedPlanned = parsePlannedDifferentialEntries(p.plannedDifferentialEntries);
+            setPlannedDifferentialEntries(
+              parsedPlanned === undefined
+                ? seedPlannedDifferentialFromShifts(migratedShifts)
+                : parsedPlanned,
+            );
           }
         } else if (!cancelled) {
           setTemplates(seedTemplates(new Date().toISOString()));
           setSettings(defaultSettings());
           setCustomRotation(null);
+          setPlannedDifferentialEntries([]);
         }
       } catch {
         if (!cancelled) {
           setTemplates(seedTemplates(new Date().toISOString()));
           setSettings(defaultSettings());
           setCustomRotation(null);
+          setPlannedDifferentialEntries([]);
         }
       } finally {
         if (!cancelled) setReady(true);
@@ -334,9 +400,16 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!ready) return;
-    const payload: PersistShape = { shifts, templates, overtime, settings, customRotation };
+    const payload: PersistShape = {
+      shifts,
+      templates,
+      overtime,
+      settings,
+      customRotation,
+      plannedDifferentialEntries,
+    };
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload)).catch(() => {});
-  }, [shifts, templates, overtime, settings, customRotation, ready]);
+  }, [shifts, templates, overtime, settings, customRotation, plannedDifferentialEntries, ready]);
 
   const upsertShiftForDate = useCallback((row: Omit<ShiftItem, "id" | "createdAt"> & { id?: number }) => {
     const createdAt = new Date().toISOString();
@@ -360,26 +433,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const bulkUpsertShifts = useCallback((rows: GeneratedShiftRow[]) => {
+    if (rows.length === 0) return 0;
+    const coveredFrom = rows.reduce((m, r) => (r.date < m ? r.date : m), rows[0]!.date);
+    const coveredTo = rows.reduce((m, r) => (r.date > m ? r.date : m), rows[0]!.date);
     setShifts((prev) => {
-      const map = new Map(prev.map((s) => [s.date, s]));
-      let nid = nextId(prev);
-      for (const r of rows) {
-        const existing = map.get(r.date);
-        const id = existing?.id ?? nid;
-        if (!existing) nid += 1;
-        map.set(r.date, {
-          id,
-          name: r.name,
-          color: r.color,
-          startTime: r.startTime,
-          endTime: r.endTime,
-          date: r.date,
-          notes: r.notes ?? null,
-          createdAt: existing?.createdAt ?? new Date().toISOString(),
-          systemTag: r.systemTag,
-        });
-      }
-      return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+      const next = applyBulkShiftRows(prev, rows);
+      setPlannedDifferentialEntries((planned) =>
+        mergePlannedDifferentialEntries(planned, next, coveredFrom, coveredTo),
+      );
+      return next;
     });
     return rows.length;
   }, []);
@@ -446,6 +508,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       leaveEnd?: string | null;
       holidayWorkStart?: string | null;
       holidayWorkEnd?: string | null;
+      disasterStop?: boolean;
       notes?: string;
     }) => {
       setOvertime((prev) => {
@@ -466,7 +529,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
             "holidayWorkStart" in data ? (data.holidayWorkStart ?? null) : (existing?.holidayWorkStart ?? null),
           holidayWorkEnd:
             "holidayWorkEnd" in data ? (data.holidayWorkEnd ?? null) : (existing?.holidayWorkEnd ?? null),
-          notes: data.notes != null ? clampOvertimeNote(data.notes) || null : null,
+          disasterStop:
+            "disasterStop" in data ? !!data.disasterStop : !!existing?.disasterStop,
+          // 加班／請假儲存未帶備註時，不得覆寫既有 notes
+          notes:
+            "notes" in data
+              ? clampOvertimeNote(data.notes ?? "") || null
+              : (existing?.notes ?? null),
           createdAt: existing?.createdAt ?? new Date().toISOString(),
         };
         return [...rest, row].sort((a, b) => a.date.localeCompare(b.date));
@@ -510,6 +579,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       overtime,
       settings,
       customRotation,
+      plannedDifferentialEntries,
       ready,
       saveCustomRotation,
       upsertShiftForDate,
@@ -531,6 +601,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       overtime,
       settings,
       customRotation,
+      plannedDifferentialEntries,
       ready,
       saveCustomRotation,
       upsertShiftForDate,

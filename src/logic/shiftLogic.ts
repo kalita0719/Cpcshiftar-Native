@@ -1,6 +1,5 @@
 /**
- * 四班三輪 / 週期排班核心：與 old_web_code `artifacts/api-server/src/routes/shifts.ts`
- * 中 `mode: "cycle"` 分支一致——對於從 start 到 end（含）的每一天 i，
+ * 四班三輪 / 週期排班核心：對於從 start 到 end（含）的每一天 i，
  * `pattern[i % pattern.length]` 決定當日模板；`null` 表示休假列（固定色與 00:00–00:00）。
  */
 import { addDays, formatYMD, parseYMD, pad2 } from "@/src/logic/dates";
