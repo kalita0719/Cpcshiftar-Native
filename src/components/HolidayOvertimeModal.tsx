@@ -122,7 +122,33 @@ export default function HolidayOvertimeModal({ visible, onClose, date, existing,
   };
 
   const del = () => {
-    deleteOvertimeByDate(date);
+    // 只取消休假日加班時段；有備註／天災停班／其他時段則保留紀錄
+    const hasOtherSchedule =
+      (existing?.earlyHours ?? 0) > 0 ||
+      (existing?.lateHours ?? 0) > 0 ||
+      (existing?.earlyClassHours ?? 0) > 0 ||
+      (existing?.lateClassHours ?? 0) > 0 ||
+      !!(existing?.leaveStart && existing?.leaveEnd);
+    const keepRecord =
+      hasOtherSchedule ||
+      !!(existing?.notes && existing.notes.trim()) ||
+      !!existing?.disasterStop;
+
+    if (keepRecord) {
+      upsertOvertime({
+        date,
+        earlyHours: existing?.earlyHours ?? 0,
+        lateHours: existing?.lateHours ?? 0,
+        earlyClassHours: existing?.earlyClassHours ?? 0,
+        lateClassHours: existing?.lateClassHours ?? 0,
+        leaveStart: existing?.leaveStart ?? null,
+        leaveEnd: existing?.leaveEnd ?? null,
+        holidayWorkStart: null,
+        holidayWorkEnd: null,
+      });
+    } else {
+      deleteOvertimeByDate(date);
+    }
     onClose();
   };
 

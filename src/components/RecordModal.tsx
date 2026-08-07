@@ -582,7 +582,24 @@ export default function RecordModal({ visible, onClose, date, existing, shift }:
   };
 
   const del = () => {
-    deleteOvertimeByDate(date);
+    // 只取消加班／請假時段；有備註或天災停班則保留紀錄
+    const keepRecord =
+      !!(existing?.notes && existing.notes.trim()) || !!existing?.disasterStop;
+    if (keepRecord) {
+      upsertOvertime({
+        date,
+        earlyHours: 0,
+        lateHours: 0,
+        earlyClassHours: 0,
+        lateClassHours: 0,
+        leaveStart: null,
+        leaveEnd: null,
+        holidayWorkStart: null,
+        holidayWorkEnd: null,
+      });
+    } else {
+      deleteOvertimeByDate(date);
+    }
     onClose();
   };
 
